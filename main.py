@@ -2579,6 +2579,14 @@ async def on_message(message):
 
         # Handle ticket creation only if the message is in the support channel
     if message.channel.id == SUPPORT_CHANNEL_ID:
+        # Check if the user already has an active ticket
+        user_id = message.author.id
+        if user_id in active_tickets.values():
+            await message.channel.send("❌ You already have an active ticket. Please close it before opening a new one.",
+                                       delete_after=10)
+            await message.delete()  # Also delete their message so the channel stays clean
+            return
+
         # Create a new private channel for the ticket
         guild = message.guild
         user = message.author
