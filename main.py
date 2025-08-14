@@ -294,7 +294,7 @@ async def on_ready():
     """Event handler for when the bot has connected to Discord."""
     global user_points, approved_proofs, quest_submissions, weekly_quests, admin_points, gm_log
     global submissions, user_xp, points_history, history_message_id, giveaway_winners_log, giveaway_history_message_id, all_time_giveaway_winners_log
-    global referral_data, pending_referrals, invite_cache, user_points, processed_reactions
+    global referral_data, pending_referrals, invite_cache, processed_reactions
 
     # Load user points data
     try:
@@ -329,7 +329,11 @@ async def on_ready():
 
         # NEW: Load invites from cache
     for guild in bot.guilds:
-        invite_cache[guild.id] = await guild.invites()
+        try:
+            invite_cache[guild.id] = await guild.invites()
+            print(f"✅ Invite cache initialized for {guild.name} ({len(invite_cache[guild.id])} invites)")
+        except discord.Forbidden:
+            print(f"⚠️ Missing permission to view invites for {guild.name}")
 
     processed_reactions = set(load_json_file_with_list_defaults('processed_reactions.json', []))
 
@@ -457,8 +461,8 @@ def get_economy_message_content(admin_data):
             f"**Total Supply:** {total_supply:.2f} points (${usd_total_supply:.2f})\n"
             f"**Remaining Supply:** {balance:.2f} points (${usd_balance:.2f})\n"
             f"**In Circulation:** {in_circulation:.2f} points (${usd_in_circulation:.2f})\n"
-            f"**Total Burned:** {burned_points:.2f} points (${usd_burned_points:.2f})\n"
-            f"**Total Treasury:** {treasury:.2f} points (${usd_treasury:.2f})\n"
+            f"**Burned:** {burned_points:.2f} points (${usd_burned_points:.2f})\n"
+            f"**Treasury:** {treasury:.2f} points (${usd_treasury:.2f})\n"
             f"**Admin's Earned Points:** {my_points:.2f} points (${usd_my_points:.2f})\n"
             f"*(Last updated: <t:{int(time.time())}:R>)*"
         )
@@ -885,6 +889,32 @@ async def on_member_update(before, after):
         except Exception as e:
             print(f"❌ An error occurred while saving files: {e}")
 
+        # Check if the change was about a role update
+        if before.roles == after.roles:
+            return
+
+        # Check if the member is the bot itself to prevent errors
+        if after.bot:
+            return
+
+        verified_role = after.guild.get_role(TIVATED_ROLE_ID)
+
+        # Check if the verified role was removed from the user
+        if verified_role in before.roles and verified_role not in after.roles:
+            try:
+                # Create a list of roles to remove
+                roles_to_remove = [role for role in after.roles if role.id != after.guild.default_role.id]
+
+                # Remove all roles from the member
+                for role in roles_to_remove:
+                    await after.remove_roles(role, reason="Verified role was removed.")
+
+                print(f"Removed all roles from {after.name} because their verified role was removed.")
+
+            except discord.Forbidden:
+                print(f"Permission error: Bot could not remove roles from {after.name}.")
+            
+
 
 def get_referral_leaderboard_content(referral_data):
     """Generates a formatted referral leaderboard message from the referral data."""
@@ -1077,7 +1107,7 @@ async def on_reaction_add(reaction, user):
             pass
         return
 
-    # --- All checks passed. Begin awarding process ---
+    # --- All checks passed. Begin awarding processes ---
 
     user_id = str(reaction.message.author.id)
 
@@ -2453,6 +2483,7 @@ async def on_message(message):
 
                     if is_admin:
                         # Award points to the Admin's personal balance
+                        admin_points["balance"] -= GM_G1ST_POINTS_REWARD
                         admin_points["my_points"] += GM_G1ST_POINTS_REWARD
                         admin_points["claimed_points"] += GM_G1ST_POINTS_REWARD
                         save_json_file(ADMIN_POINTS_FILE, admin_points)
@@ -2625,36 +2656,7 @@ async def on_message(message):
                                        delete_after=10)
 
         # We return here so the command is not processed twice
-        return
-
-
-#----------------------------------------------------------------------------------------------------
-@bot.event
-async def on_member_update(before, after):
-    # Check if the change was about a role update
-    if before.roles == after.roles:
-        return
-
-    # Check if the member is the bot itself to prevent errors
-    if after.bot:
-        return
-
-    verified_role = after.guild.get_role(TIVATED_ROLE_ID)
-
-    # Check if the verified role was removed from the user
-    if verified_role in before.roles and verified_role not in after.roles:
-        try:
-            # Create a list of roles to remove
-            roles_to_remove = [role for role in after.roles if role.id != after.guild.default_role.id]
-
-            # Remove all roles from the member
-            for role in roles_to_remove:
-                await after.remove_roles(role, reason="Verified role was removed.")
-
-            print(f"Removed all roles from {after.name} because their verified role was removed.")
-
-        except discord.Forbidden:
-            print(f"Permission error: Bot could not remove roles from {after.name}.")
+        return 
 
 
 #-----------------------------------S U P P O R T --- S Y S T E M------------------------
