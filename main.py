@@ -348,15 +348,41 @@ async def on_ready():
 
 
 # === LOG POINTS TRANSACTIONS ===
-async def log_points_transaction(user_id, points, purpose):
-    """Adds a new entry to the points' history log and updates the channel message."""
-    new_entry = {
-        "user_id": str(user_id),
-        "points": points,
-        "purpose": purpose,
-        "timestamp": datetime.now().isoformat()
-    }
-    points_history.append(new_entry)
+async def log_points_transaction(user_id, amount, reason):
+    """Logs a points transaction to the points history channel and to the burns log if it's a burn transaction."""
+    global points_history
+
+    user = bot.get_user(int(user_id))
+    user_name = user.name if user else "Unknown User"
+
+    # Create the log message
+    sign = "+" if amount >= 0 else ""
+    log_message = f"💵 {user_name} ({user_id}) | {reason} | **{sign}{amount:.2f} pts**"
+
+    # Log to the main points history channel
+    history_channel = bot.get_channel(POINTS_HISTORY_CHANNEL_ID)
+    if history_channel:
+        try:
+            await history_channel.send(log_message)
+        except discord.Forbidden:
+            print(f"Bot missing permissions to log transaction to channel ({POINTS_HISTORY_CHANNEL_ID}).")
+
+    # Check if this is a burn transaction
+    if "(burn)" in reason:
+        burns_channel = bot.get_channel(BURNS_LOG_CHANNEL_ID)
+        if burns_channel:
+            try:
+                await burns_channel.send(f"🔥 BURN LOG: {log_message}")
+            except discord.Forbidden:
+                print(f"Bot missing permissions to log burn transaction to channel ({BURNS_LOG_CHANNEL_ID}).")
+
+    # Save to the log file (optional, but good for data persistence)
+    points_history.append({
+        "user_id": user_id,
+        "amount": amount,
+        "reason": reason,
+        "timestamp": datetime.utcnow().isoformat()
+    })
     save_json_file(POINTS_HISTORY_FILE, points_history)
 
     # --- NEW LINE ---
