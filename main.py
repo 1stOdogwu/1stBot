@@ -885,6 +885,32 @@ async def on_member_update(before, after):
         except Exception as e:
             print(f"❌ An error occurred while saving files: {e}")
 
+        # Check if the change was about a role update
+        if before.roles == after.roles:
+            return
+
+        # Check if the member is the bot itself to prevent errors
+        if after.bot:
+            return
+
+        verified_role = after.guild.get_role(TIVATED_ROLE_ID)
+
+        # Check if the verified role was removed from the user
+        if verified_role in before.roles and verified_role not in after.roles:
+            try:
+                # Create a list of roles to remove
+                roles_to_remove = [role for role in after.roles if role.id != after.guild.default_role.id]
+
+                # Remove all roles from the member
+                for role in roles_to_remove:
+                    await after.remove_roles(role, reason="Verified role was removed.")
+
+                print(f"Removed all roles from {after.name} because their verified role was removed.")
+
+            except discord.Forbidden:
+                print(f"Permission error: Bot could not remove roles from {after.name}.")
+
+
 
 def get_referral_leaderboard_content(referral_data):
     """Generates a formatted referral leaderboard message from the referral data."""
