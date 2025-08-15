@@ -2,11 +2,9 @@ import json
 import logging
 import os
 import random
-import math
 import re
-from urllib.parse import urlparse, parse_qs, urlunparse
+from urllib.parse import urlparse, urlunparse
 import time
-from datetime import datetime
 import asyncio
 
 import discord
@@ -52,6 +50,7 @@ REFERRALS_FILE = "referrals.json"
 PENDING_REFERRALS_FILE = "pending_referrals.json"
 PROCESSED_REACTIONS_FILE = 'processed_reactions.json'
 ACTIVE_TICKETS_FILE = "active_tickets.json"
+MYSTERYBOX_USES_FILE = "mysterybox_uses.json"
 economy_message_id = None
 history_message_id = None
 giveaway_history_message_id = None
@@ -149,6 +148,20 @@ def save_points_history():
 def save_active_tickets():
     save_json_file(ACTIVE_TICKETS_FILE, active_tickets)
 
+def ensure_user(user_id: str):
+    """Ensures a user has an entry in the user_points dictionary."""
+    if user_id not in user_points:
+        user_points[user_id] = {"all_time_points": 0.0, "available_points": 0.0}
+
+def get_user_balance(user_id: str) -> float:
+    """Safely retrieves a user's available points."""
+    return user_points.get(user_id, {}).get("available_points", 0.0)
+
+def admin_can_issue(amount: float) -> bool:
+    """Checks if the admin has enough points to issue."""
+    return admin_points["balance"] >= amount
+
+
 
 # --- Load files that are DICTIONARIES ---
 user_points = load_json_file_with_dict_defaults(POINTS_FILE, {})
@@ -170,6 +183,7 @@ admin_points = load_json_file_with_dict_defaults(ADMIN_POINTS_FILE, {
 referral_data = load_json_file_with_dict_defaults(REFERRALS_FILE, {})
 pending_referrals = load_json_file_with_dict_defaults(PENDING_REFERRALS_FILE, {})
 active_tickets = load_json_file_with_dict_defaults(ACTIVE_TICKETS_FILE, {})
+mysterybox_uses = load_json_file_with_dict_defaults(MYSTERYBOX_USES_FILE, {})
 
 # --- Load files that are LISTS ---
 approved_proofs = load_json_file_with_list_defaults(APPROVED_PROOFS_FILE, [])
@@ -186,6 +200,7 @@ print(f"giveaway_winners_log type: {type(giveaway_winners_log)}")
 
 # --- Channel & Role IDs (Ensure these are correct for your server) ---
 ARCHIVED_TICKETS_CATEGORY_ID = 1403762112362184714
+BURNS_LOG_CHANNEL_ID = 1406022417075273849
 COMMAND_LOG_CHANNEL = 1401443654371115018
 ENGAGEMENT_CHANNEL_ID = 1399127357595582616
 FIRST_ODOGWU_CHANNEL_ID = 1402065169890148454
@@ -195,6 +210,7 @@ LEADERBOARD_CHANNEL_ID = 1399125979644821574
 MOD_PAYMENT_REVIEW_CHANNEL_ID = 1400522100078280815
 MOD_QUEST_REVIEW_CHANNEL_ID = 1399109405995434115
 MOD_TASK_REVIEW_CHANNEL_ID = 1401135862661779466
+MYSTERYBOX_CHANNEL_ID = 1405125500015349780
 PAYMENT_CHANNEL_ID = 1400466642843992074
 PAYOUT_REQUEST_CHANNEL_ID = 1399126179574714368
 POINTS_HISTORY_CHANNEL_ID = 1402322062533726289
@@ -214,6 +230,12 @@ CONFIRMATION_TIMEOUT = 30
 POINTS_TO_USD = 0.0005
 GM_G1ST_POINTS_REWARD = 150.0
 APPROVED_EXCHANGES = ["binance", "bitget", "bybit", "mexc", "bingx"]
+
+#MYSTERY-BOX CONFIGURATION CONSTANTS
+MYSTERYBOX_COST = 1000
+MYSTERYBOX_REWARDS = [500, 800, 1000, 1600]
+MYSTERYBOX_WEIGHTS = [35, 30, 20, 15]
+MYSTERYBOX_MAX_PER_24H = 2
 
 # === Role IDs ===
 TIVATED_ROLE_ID = 1399078534672158811
@@ -294,7 +316,7 @@ async def on_ready():
     """Event handler for when the bot has connected to Discord."""
     global user_points, approved_proofs, quest_submissions, weekly_quests, admin_points, gm_log
     global submissions, user_xp, points_history, history_message_id, giveaway_winners_log, giveaway_history_message_id, all_time_giveaway_winners_log
-    global referral_data, pending_referrals, invite_cache, user_points, processed_reactions
+    global referral_data, pending_referrals, invite_cache, processed_reactions
 
     # Load user points data
     try:
@@ -329,7 +351,11 @@ async def on_ready():
 
         # NEW: Load invites from cache
     for guild in bot.guilds:
-        invite_cache[guild.id] = await guild.invites()
+        try:
+            invite_cache[guild.id] = await guild.invites()
+            print(f"✅ Invite cache initialized for {guild.name} ({len(invite_cache[guild.id])} invites)")
+        except discord.Forbidden:
+            print(f"⚠️ Missing permission to view invites for {guild.name}")
 
     processed_reactions = set(load_json_file_with_list_defaults('processed_reactions.json', []))
 
@@ -385,9 +411,6 @@ async def log_points_transaction(user_id, amount, reason):
     })
     save_json_file(POINTS_HISTORY_FILE, points_history)
 
-    # --- NEW LINE ---
-    await update_points_history_message()
-
 
 # === POINTS HISTORY MESSAGE ===
 async def update_points_history_message():
@@ -428,7 +451,7 @@ async def update_points_history_message():
         print(f"Error: Bot does not have permissions to send/edit messages in channel {channel.name}.")
 
 
-# === COMMAND LOGGING & RATE LIMITING ===
+#------------------C O M M A N D    L O G G I N G    &    R A T E     L I M I T I N G------------------
 @tasks.loop(minutes=5)
 async def save_logs_periodically():
     """Saves the command logs to a file every 5 minutes."""
@@ -483,8 +506,8 @@ def get_economy_message_content(admin_data):
             f"**Total Supply:** {total_supply:.2f} points (${usd_total_supply:.2f})\n"
             f"**Remaining Supply:** {balance:.2f} points (${usd_balance:.2f})\n"
             f"**In Circulation:** {in_circulation:.2f} points (${usd_in_circulation:.2f})\n"
-            f"**Total Burned:** {burned_points:.2f} points (${usd_burned_points:.2f})\n"
-            f"**Total Treasury:** {treasury:.2f} points (${usd_treasury:.2f})\n"
+            f"**Burned:** {burned_points:.2f} points (${usd_burned_points:.2f})\n"
+            f"**Treasury:** {treasury:.2f} points (${usd_treasury:.2f})\n"
             f"**Admin's Earned Points:** {my_points:.2f} points (${usd_my_points:.2f})\n"
             f"*(Last updated: <t:{int(time.time())}:R>)*"
         )
@@ -499,6 +522,8 @@ def get_economy_message_content(admin_data):
 async def update_economy_message():
     """Periodically updates the economy status message in a dedicated channel."""
     global economy_message_id
+    message_content = None
+    channel = None
 
     try:
         channel = bot.get_channel(FIRST_ODOGWU_CHANNEL_ID)
@@ -563,7 +588,7 @@ async def on_command_error(ctx, error):
 
 # --- Example Command using the new system ---
 @bot.command()
-@commands.cooldown(5, 1800, commands.BucketType.user) # 5 uses per 30 minutes per user
+@commands.cooldown(5, 1800, commands.BucketType.user)
 async def newcommand(ctx):
     """An example of a rate-limited command."""
     await ctx.send("This command is limited to 5 uses every 30 minutes.")
@@ -696,7 +721,7 @@ async def weekly_xp_bonus():
         return
 
     # NEW: Calculate total points to be awarded and check admin balance
-    points_to_award = len(top_users) * 30
+    points_to_award = len(top_users) * 200
     if admin_points["balance"] < points_to_award:
         print("⚠️ Admin balance is too low to award weekly XP bonus. Skipping.")
         return
@@ -894,6 +919,9 @@ async def on_member_update(before, after):
 
             # --- END TRANSACTION ---
 
+    referrer_points = 0.0
+    new_member_points = 0.0
+
     if awarded:
         # If the transaction was successful, save all files
         try:
@@ -943,12 +971,12 @@ def get_referral_leaderboard_content(referral_data):
     if not referral_data:
         return "The referral leaderboard is empty."
 
-    # Count referrals for each user
-    referral_counts = {
-        referrer_id: len(referrals)
-        for referrer_id, referrals in referral_data.items()
-        if isinstance(referrals, list)
-    }
+    # Count referrals for each user by iterating through the values of the dictionary
+    referral_counts = {}
+    for user_id, referrer_id in referral_data.items():
+        # Ensure referrer_id is not the bot's ID
+        if int(referrer_id) != bot.user.id:
+            referral_counts[referrer_id] = referral_counts.get(referrer_id, 0) + 1
 
     # Sort the users by their referral count
     sorted_referrals = sorted(
@@ -1020,7 +1048,6 @@ async def update_referral_leaderboard():
 
 # === INVITE MECHANISM ===
 @bot.command(name="invite")
-@commands.cooldown(1, 60, commands.BucketType.user)
 async def invite_link(ctx):
     """
     Generates a unique referral link for the user.
@@ -1129,7 +1156,7 @@ async def on_reaction_add(reaction, user):
             pass
         return
 
-    # --- All checks passed. Begin awarding process ---
+    # --- All checks passed. Begin awarding processes ---
 
     user_id = str(reaction.message.author.id)
 
@@ -1814,41 +1841,100 @@ async def update_points_leaderboard():
         print(f"❌ An error occurred in the points leaderboard task: {e}")
 
 
-
-# === !myrank ===
-@bot.command()
+#-----------------------M  Y---------------R   A   N   K----------------------------------------------
+@bot.command(name="rank")
 @commands.cooldown(1, 60, commands.BucketType.user)
-async def myrank(ctx):
-    """Displays the user's current rank and available points."""
+async def rank(ctx):
+    """Shows the user's rank and the top 10 leaderboard."""
+
     if ctx.channel.id != LEADERBOARD_CHANNEL_ID:
         try:
             await ctx.message.delete(delay=5)
-            await ctx.send(f"❌ This command can only be used in the <#{LEADERBOARD_CHANNEL_ID}> channel.", delete_after=10)
+            await ctx.send(
+                f"❌ This command can only be used in the <#{LEADERBOARD_CHANNEL_ID}> channel.",
+                delete_after=10
+            )
         except discord.Forbidden:
             pass
         return
 
     user_id = str(ctx.author.id)
     user_data = user_points.get(user_id, {"all_time_points": 0.0})
-    user_score = user_data["all_time_points"]
+    user_score = user_data.get("all_time_points", 0.0)
 
-    if not user_score:
-        await ctx.send(f"{ctx.author.mention}, you currently have no all-time points. Start earning!", delete_after=20)
+    # Filter eligible users (exclude admin, mods, non-members)
+    eligible_users = {}
+    for uid, data in user_points.items():
+        try:
+            member = ctx.guild.get_member(int(uid))
+            if member and not any(role.id in [ADMIN_ROLE_ID, MOD_ROLE_ID] for role in member.roles):
+                if data.get('all_time_points', 0) > 0:
+                    eligible_users[uid] = data
+        except (ValueError, discord.NotFound):
+            continue
+
+    if not eligible_users:
+        await ctx.send("The leaderboard is currently empty. Start earning points!", delete_after=20)
         return
 
-    # Note: Sorting is based on all_time_points, as per our previous discussion.
-    sorted_users = sorted(user_points.items(), key=lambda item: item[1]['all_time_points'], reverse=True)
+    # Sort for leaderboard
+    sorted_users = sorted(
+        eligible_users.items(),
+        key=lambda item: item[1].get('all_time_points', 0.0),
+        reverse=True
+    )
 
-    rank = None
-    for i, (uid, _) in enumerate(sorted_users, 1):
+    # Find user's rank
+    rank_position = None
+    for i, (uid, _) in enumerate(sorted_users, start=1):
         if uid == user_id:
-            rank = i
+            rank_position = i
             break
 
-    if rank:
-        await ctx.send(f"👑 {ctx.author.mention}, you are currently **#{rank}** with **{user_score:.2f} all-time points**.", delete_after=30)
+    # Embed setup
+    embed = discord.Embed(
+        title="🏆 Odogwu Global Rankings",
+        description=f"Your progress and the **Top 10 Legends** of {ctx.guild.name}.",
+        color=discord.Color.gold()
+    )
+
+    # Add personal rank
+    if rank_position:
+        embed.add_field(
+            name=f"👑 Your Rank",
+            value=f"**#{rank_position}** with **{user_score:.2f} points**",
+            inline=False
+        )
     else:
-        await ctx.send(f"{ctx.author.mention}, we couldn't find your rank. There might be an issue.", delete_after=20)
+        embed.add_field(
+            name=f"👑 Your Rank",
+            value="You are not ranked yet. Start earning points!",
+            inline=False
+        )
+
+    # Add leaderboard
+    medals = ["🥇", "🥈", "🥉"]
+    leaderboard_text = ""
+    for i, (uid, data) in enumerate(sorted_users[:10]):
+        member = ctx.guild.get_member(int(uid))
+        username = member.name if member else f"Unknown User ({uid})"
+
+        # Highlight if this is the command user
+        if uid == user_id:
+            username = f"⭐ **{username}** ⭐"
+
+        medal = medals[i] if i < len(medals) else "🏅"
+        leaderboard_text += f"{medal} **#{i + 1} – {username}**: {data['all_time_points']:.2f} pts\n"
+
+    embed.add_field(name="🌟 Top 10 Legends", value=leaderboard_text, inline=False)
+
+    embed.set_footer(
+        text="Grind, engage, and claim your spot at the top!",
+        icon_url=ctx.guild.icon.url if ctx.guild.icon else None
+    )
+    embed.timestamp = datetime.utcnow()
+
+    await ctx.send(embed=embed)
 
 
 # === MODIFIED: !leaderboard command to show all-time points ===
@@ -2008,7 +2094,7 @@ async def requestpayout(ctx, amount: float = None, uid: str = None, exchange: st
         pass
 
 
-# === !CONFIRMPAYOUT ===
+# === !CONFIRM-PAYOUT ===
 @bot.command()
 @commands.cooldown(1, 30, commands.BucketType.user)
 async def confirmpayout(ctx):
@@ -2134,6 +2220,7 @@ async def paid(ctx, member: discord.Member):
             fee = pending_payout["fee"]
 
             admin_points["balance"] -= requested_amount  # Burn the requested points
+            admin_points["claimed_points"] -= requested_amount
             admin_points["claimed_points"] += fee  # Add the fee back to the balance
             admin_points["burned_points"] += requested_amount
             admin_points["fees_earned"] += fee
@@ -2146,7 +2233,7 @@ async def paid(ctx, member: discord.Member):
             save_points()
 
             await payout_channel.send(
-                f"🎉 {member.mention}, great news! Your recent payout request of **{requested_amount:.2f} pts** has been successfully processed."
+                f"🎉 {member.mention}, great news! Your recent payout request has been successfully processed."
             )
             await ctx.send(
                 f"✅ A payout success message has been sent to {member.mention}. The payout has been finalized and points burned.",
@@ -2505,11 +2592,14 @@ async def on_message(message):
 
                     if is_admin:
                         # Award points to the Admin's personal balance
+                        admin_points["balance"] -= GM_G1ST_POINTS_REWARD
                         admin_points["my_points"] += GM_G1ST_POINTS_REWARD
                         admin_points["claimed_points"] += GM_G1ST_POINTS_REWARD
                         save_json_file(ADMIN_POINTS_FILE, admin_points)
+
+                        await log_points_transaction(user_id, GM_G1ST_POINTS_REWARD, "GM points")
                         await message.channel.send(
-                            f"🪙 {message.author.mention}, you (Admin) have been awarded **{GM_G1ST_POINTS_REWARD:.2f} points**!",
+                            f"🪙 {message.author.mention}, you have been awarded **{GM_G1ST_POINTS_REWARD:.2f} points**!",
                             delete_after=5
                         )
                     else:
@@ -2688,35 +2778,6 @@ async def on_message(message):
         return
 
 
-#----------------------------------------------------------------------------------------------------
-@bot.event
-async def on_member_update(before, after):
-    # Check if the change was about a role update
-    if before.roles == after.roles:
-        return
-
-    # Check if the member is the bot itself to prevent errors
-    if after.bot:
-        return
-
-    verified_role = after.guild.get_role(TIVATED_ROLE_ID)
-
-    # Check if the verified role was removed from the user
-    if verified_role in before.roles and verified_role not in after.roles:
-        try:
-            # Create a list of roles to remove
-            roles_to_remove = [role for role in after.roles if role.id != after.guild.default_role.id]
-
-            # Remove all roles from the member
-            for role in roles_to_remove:
-                await after.remove_roles(role, reason="Verified role was removed.")
-
-            print(f"Removed all roles from {after.name} because their verified role was removed.")
-
-        except discord.Forbidden:
-            print(f"Permission error: Bot could not remove roles from {after.name}.")
-
-
 #-----------------------------------S U P P O R T --- S Y S T E M------------------------
 
 @bot.command()
@@ -2761,6 +2822,113 @@ async def close(ctx):
     except Exception as e:
         print(f"❌ An error occurred while closing the ticket: {e}")
         await ctx.send("❌ An unexpected error occurred while closing the ticket.")
+
+
+
+#--------------------M Y S T E R Y     B O X     S Y S T E M-------------------------------------
+
+def _mb_get_uses_in_last_24h(uid: str) -> int:
+    ts_list = mysterybox_uses.get(uid, [])
+    cutoff = time.time() - 24 * 3600
+    ts_list = [t for t in ts_list if t >= cutoff]
+    mysterybox_uses[uid] = ts_list
+    save_json_file(MYSTERYBOX_USES_FILE, mysterybox_uses)
+    return len(ts_list)
+
+def _mb_add_use(uid: str):
+    ts_list = mysterybox_uses.get(uid, [])
+    ts_list.append(time.time())
+    mysterybox_uses[uid] = ts_list
+    save_json_file(MYSTERYBOX_USES_FILE, mysterybox_uses)
+
+@bot.command(name="mysterybox")
+async def cmd_mysterybox(ctx: commands.Context):
+    # Channel restriction
+    if ctx.channel.id != MYSTERYBOX_CHANNEL_ID:
+        await ctx.send(f"❌ Use this command in <#{MYSTERYBOX_CHANNEL_ID}> only.", delete_after=8)
+        return
+
+    user_id = str(ctx.author.id)
+
+    # Daily usage check
+    used = _mb_get_uses_in_last_24h(user_id)
+    if used >= MYSTERYBOX_MAX_PER_24H:
+        # find time until next reset
+        oldest = min(mysterybox_uses[user_id]) if mysterybox_uses.get(user_id) else time.time()
+        secs = int(24 * 3600 - (time.time() - oldest))
+        if secs < 0: secs = 0
+        hrs = secs // 3600
+        mins = (secs % 3600) // 60
+        await ctx.send(f"⏳ You’ve reached your daily limit (2/24h). Try again in **{hrs}h {mins}m**.", delete_after=8)
+        return
+
+    # User balance check
+    if get_user_balance(user_id) < MYSTERYBOX_COST:
+        await ctx.send(f"❌ You need **{MYSTERYBOX_COST} pts** to open a Mystery Box.", delete_after=8)
+        return
+
+    # Deduct cost from user's available points
+    ensure_user(user_id)
+    user_points[user_id]["available_points"] -= MYSTERYBOX_COST
+    save_json_file(POINTS_FILE, user_points)
+
+    # Draw reward
+    reward = random.choices(MYSTERYBOX_REWARDS, weights=MYSTERYBOX_WEIGHTS, k=1)[0]
+
+    # Credit reward to user (this is *new* issuance only for the delta if reward > cost)
+    # We always credit the reward amount to the user balance:
+    user_points[user_id]["available_points"] += reward
+    user_points[user_id]["all_time_points"] += reward  # reflect gross credited to the user
+    save_json_file(POINTS_FILE, user_points)
+
+    # Economy accounting:
+    # - If reward > cost: the extra (reward - cost) is newly issued by admin → reduce admin balance & increase claimed_points
+    # - If reward == cost: net neutral to economy
+    # - If reward < cost: the shortfall (cost - reward) is burned (burned_points += diff)
+    if reward > MYSTERYBOX_COST:
+        delta = reward - MYSTERYBOX_COST
+        if admin_can_issue(delta):
+            admin_points["balance"] -= delta
+            admin_points["claimed_points"] += delta
+        else:
+            # If somehow admin cannot cover, fallback: undo the extra above cost
+            user_points[user_id]["available_points"] -= delta
+            user_points[user_id]["all_time_points"] -= delta
+            save_json_file(POINTS_FILE, user_points)
+            reward = MYSTERYBOX_COST  # clamp to avoid inflation
+    elif reward < MYSTERYBOX_COST:
+        burn = MYSTERYBOX_COST - reward
+        admin_points["burned_points"] += burn
+        admin_points["claimed_points"] -= burn
+        await log_points_transaction(bot.user.id, float(burn), f"Mystery Box: {ctx.author.name} (burn)")
+
+    save_json_file(ADMIN_POINTS_FILE, admin_points)
+
+    # Log transactions (to your central logger)
+    # Log net results as: +reward (credit) and -cost (spend)
+    await log_points_transaction(user_id, -float(MYSTERYBOX_COST), "Mystery Box: cost")
+    await log_points_transaction(user_id, float(reward), "Mystery Box: reward")
+
+    # Use count++
+    _mb_add_use(user_id)
+
+    # Command log echo
+    log_ch = bot.get_channel(COMMAND_LOG_CHANNEL)
+    if log_ch:
+        await log_ch.send(f"🎁 Mystery Box used by <@{user_id}> — reward: **{reward}** pts")
+
+    # Result embed (no burn disclosure)
+    color = discord.Color.green() if reward >= MYSTERYBOX_COST else discord.Color.orange()
+    embed = discord.Embed(
+        title="🎁 Mystery Box Opened!",
+        description=f"{ctx.author.mention} you spent **{MYSTERYBOX_COST} pts** and received:",
+        color=color
+    )
+    embed.add_field(name="Reward", value=f"💎 **{reward} points**", inline=False)
+    embed.set_footer(text="Good luck next time!" if reward < MYSTERYBOX_COST else "Nice hit!")
+    embed.timestamp = datetime.utcnow()
+    await ctx.send(embed=embed)
+
 
 if __name__ == "__main__":
     bot.run(token, log_handler=handler, log_level=logging.DEBUG)
