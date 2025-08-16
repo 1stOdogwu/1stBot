@@ -9,6 +9,7 @@ import asyncio
 
 import discord
 from discord.ext import commands, tasks
+from datetime import UTC
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -51,6 +52,7 @@ PENDING_REFERRALS_FILE = "pending_referrals.json"
 PROCESSED_REACTIONS_FILE = 'processed_reactions.json'
 ACTIVE_TICKETS_FILE = "active_tickets.json"
 MYSTERYBOX_USES_FILE = "mysterybox_uses.json"
+REFERRED_USERS_FILE = "referred_users.json"
 economy_message_id = None
 history_message_id = None
 giveaway_history_message_id = None
@@ -148,6 +150,12 @@ def save_points_history():
 def save_active_tickets():
     save_json_file(ACTIVE_TICKETS_FILE, active_tickets)
 
+def save_mysterybox_uses():
+    save_json_file(MYSTERYBOX_USES_FILE, mysterybox_uses)
+
+def save_referred_users():
+    save_json_file(REFERRED_USERS_FILE, referred_users)
+
 def ensure_user(user_id: str):
     """Ensures a user has an entry in the user_points dictionary."""
     if user_id not in user_points:
@@ -184,6 +192,7 @@ referral_data = load_json_file_with_dict_defaults(REFERRALS_FILE, {})
 pending_referrals = load_json_file_with_dict_defaults(PENDING_REFERRALS_FILE, {})
 active_tickets = load_json_file_with_dict_defaults(ACTIVE_TICKETS_FILE, {})
 mysterybox_uses = load_json_file_with_dict_defaults(MYSTERYBOX_USES_FILE, {})
+referred_users = load_json_file_with_dict_defaults(REFERRED_USERS_FILE, {})
 
 # --- Load files that are LISTS ---
 approved_proofs = load_json_file_with_list_defaults(APPROVED_PROOFS_FILE, [])
@@ -206,6 +215,7 @@ ENGAGEMENT_CHANNEL_ID = 1399127357595582616
 FIRST_ODOGWU_CHANNEL_ID = 1402065169890148454
 GIVEAWAY_CHANNEL_ID = 1402371502875218032
 GM_G1ST_CHANNEL_ID = 1402045203262603375
+HOW_TO_JOIN_CHANNEL_ID = 1399097281428324362
 LEADERBOARD_CHANNEL_ID = 1399125979644821574
 MOD_PAYMENT_REVIEW_CHANNEL_ID = 1400522100078280815
 MOD_QUEST_REVIEW_CHANNEL_ID = 1399109405995434115
@@ -233,7 +243,7 @@ APPROVED_EXCHANGES = ["binance", "bitget", "bybit", "mexc", "bingx"]
 
 #MYSTERY-BOX CONFIGURATION CONSTANTS
 MYSTERYBOX_COST = 1000
-MYSTERYBOX_REWARDS = [500, 800, 1000, 1600]
+MYSTERYBOX_REWARDS = [900, 800, 1000, 1600]
 MYSTERYBOX_WEIGHTS = [35, 30, 20, 15]
 MYSTERYBOX_MAX_PER_24H = 2
 
@@ -374,27 +384,25 @@ async def on_ready():
 
 
 # === LOG POINTS TRANSACTIONS ===
-async def log_points_transaction(user_id, amount, reason):
-    """Logs a points transaction to the points history channel and to the burns log if it's a burn transaction."""
-    global points_history
+async def log_points_transaction(user_id, points, purpose):
+    """Adds a new entry to the points' history log and updates the channel message."""
+    new_entry = {
+        "user_id": str(user_id),
+        "points": points,
+        "purpose": purpose,
+        "timestamp": datetime.now().isoformat()
+    }
+    points_history.append(new_entry)
+    save_json_file(POINTS_HISTORY_FILE, points_history)
 
-    user = bot.get_user(int(user_id))
-    user_name = user.name if user else "Unknown User"
+    # --- ADD THIS BLOCK FOR BURN LOGS ---
+    # Send a separate log to the burn channel for burn transactions
+    if "(burn)" in purpose:
+        user = bot.get_user(int(user_id))
+        user_name = user.name if user else "Unknown User"
+        sign = "+" if points >= 0 else ""
+        log_message = f"💵 {user_name} | {purpose} | **{sign}{points:.2f} pts**"
 
-    # Create the log message
-    sign = "+" if amount >= 0 else ""
-    log_message = f"💵 {user_name} ({user_id}) | {reason} | **{sign}{amount:.2f} pts**"
-
-    # Log to the main points history channel
-    history_channel = bot.get_channel(POINTS_HISTORY_CHANNEL_ID)
-    if history_channel:
-        try:
-            await history_channel.send(log_message)
-        except discord.Forbidden:
-            print(f"Bot missing permissions to log transaction to channel ({POINTS_HISTORY_CHANNEL_ID}).")
-
-    # Check if this is a burn transaction
-    if "(burn)" in reason:
         burns_channel = bot.get_channel(BURNS_LOG_CHANNEL_ID)
         if burns_channel:
             try:
@@ -402,14 +410,8 @@ async def log_points_transaction(user_id, amount, reason):
             except discord.Forbidden:
                 print(f"Bot missing permissions to log burn transaction to channel ({BURNS_LOG_CHANNEL_ID}).")
 
-    # Save to the log file (optional, but good for data persistence)
-    points_history.append({
-        "user_id": user_id,
-        "amount": amount,
-        "reason": reason,
-        "timestamp": datetime.utcnow().isoformat()
-    })
-    save_json_file(POINTS_HISTORY_FILE, points_history)
+    # --- NEW LINE ---
+    await update_points_history_message()
 
 
 # === POINTS HISTORY MESSAGE ===
@@ -434,7 +436,7 @@ async def update_points_history_message():
             purpose = entry["purpose"]
             timestamp = datetime.fromisoformat(entry["timestamp"]).strftime('%Y-%m-%d %H:%M')
 
-            history_message += f"• `{timestamp}`: **{user_name}** earned **{points:.2f} points** for **{purpose}**.\n"
+            history_message += f"💵• `{timestamp}`: **{user_name}** earned **{points:.2f} points** for **{purpose}**.\n"
 
     try:
         if history_message_id:
@@ -548,6 +550,8 @@ async def update_economy_message():
     except Exception as e:
         print(f"❌ An error occurred in the economy update task: {e}")
 
+
+#-------------------------A D M I N       U N I T-----------------------------------
 @bot.command()
 @commands.has_role(ADMIN_ROLE_ID)
 async def admin(ctx):
@@ -565,6 +569,72 @@ async def admin(ctx):
         await ctx.send(message_content)
     except Exception as e:
         await ctx.send(f"❌ An error occurred while checking balances: {e}")
+
+
+@bot.command(name="data")
+@commands.has_role(ADMIN_ROLE_ID)
+@commands.cooldown(1, 30, commands.BucketType.user)
+async def get_server_data(ctx):
+    """
+    (Admin Only) Displays all user data sorted by points, including referral count.
+    """
+    all_users_data = []
+
+    # Process all user data and get referral counts
+    for user_id, user_data in user_points.items():
+        all_time_points = user_data.get("all_time_points", 0.0)
+
+        # Count referrals for the current user
+        referral_count = 0
+        for _, referrer_id in referral_data.items():
+            if referrer_id == user_id:
+                referral_count += 1
+
+        all_users_data.append({
+            "id": user_id,
+            "points": all_time_points,
+            "referrals": referral_count
+        })
+
+    # Sort the list by points, from highest to lowest
+    all_users_data.sort(key=lambda x: x["points"], reverse=True)
+
+    # Prepare the embed
+    embed = discord.Embed(
+        title="📊 Server Economy Data",
+        description="A list of all users, sorted by points.",
+        color=discord.Color.dark_purple()
+    )
+
+    # Format the data into a single string for a field
+    data_text = ""
+    for idx, user_info in enumerate(all_users_data[:50], 1):  # Show top 50 users
+        try:
+            user = await bot.fetch_user(int(user_info["id"]))
+            username = user.name
+        except discord.NotFound:
+            username = f"Unknown User (ID: {user_info['id']})"
+
+        points = user_info["points"]
+        referrals = user_info["referrals"]
+
+        data_text += f"**#{idx}**: {username} - **{points:.2f} pts** | Referrals: {referrals}\n"
+
+    if data_text:
+        embed.add_field(name="User Rankings", value=data_text, inline=False)
+    else:
+        embed.add_field(name="User Rankings", value="No user data available.", inline=False)
+
+    embed.set_footer(text="Data refreshes upon command.")
+    embed.timestamp = datetime.now(UTC)
+
+    await ctx.send(embed=embed)
+
+
+@get_server_data.error
+async def data_command_error(ctx, error):
+    if isinstance(error, commands.MissingRole):
+        await ctx.send("❌ You do not have the required role to use this command.", delete_after=15)
 
 # ---------------------------------------------------------------------------
 
@@ -617,29 +687,39 @@ async def update_giveaway_winners_history():
         print(f"Error: Giveaway channel with ID {GIVEAWAY_CHANNEL_ID} not found.")
         return
 
-    # Create the message content from the ALL-TIME log
-    message_content = "🎉 **All-Time Giveaway Winners** 🎉\n"
+    # 🎉 Create the embed from the ALL-TIME log
+    embed = discord.Embed(
+        title="🎉 All-Time Giveaway Winners 🎉",
+        description="Here’s the full hall of fame for all giveaways so far 🏆",
+        color=discord.Color.gold()
+    )
+
     for winner in all_time_giveaway_winners_log:
         user = bot.get_user(int(winner['user_id']))
         user_name = user.mention if user else f"User ID: {winner['user_id']}"
-        message_content += f"**{user_name}** won **{winner['points']:.2f} points**! (Reason: {winner['purpose']})\n"
+        embed.add_field(
+            name=f"✨ {user_name}",
+            value=f"**{winner['points']:.2f} points** 🎁\n*Reason:* {winner['purpose']}",
+            inline=False
+        )
+
+    embed.set_footer(text="Updated automatically as giveaways happen 🚀")
+    embed.timestamp = datetime.now(UTC)
 
     try:
-        # Check if the history message already exists
         if giveaway_history_message_id:
             message = await channel.fetch_message(giveaway_history_message_id)
-            await message.edit(content=message_content)
+            await message.edit(embed=embed)  # ✅ Edit existing embed instead of plain text
         else:
-            # If it doesn't exist, send a new one
-            message = await channel.send(message_content)
+            message = await channel.send(embed=embed)
             giveaway_history_message_id = message.id
 
     except discord.NotFound:
-        # If the message was deleted, send a new one
-        message = await channel.send(message_content)
+        # If the old message was deleted, send a fresh one
+        message = await channel.send(embed=embed)
         giveaway_history_message_id = message.id
     except discord.Forbidden:
-        print(f"Error: Bot does not have permissions to send/edit messages in channel {channel.name}.")
+        print(f"Error: Bot does not have permissions to send/edit embeds in channel {channel.name}.")
         return
 
     # Once the message is updated, clear the temporary log file only
@@ -657,20 +737,32 @@ async def append_new_winner_to_history(new_winners_data: list):
         return
 
     if not giveaway_history_message_id:
-        # If no history message exists, create one with the new winner
-        message_content = "🎉 **All-Time Giveaway Winners** 🎉\n"
+        # 🎉 If no history message exists, create one with the new winner(s)
+        embed = discord.Embed(
+            title="🎉 All-Time Giveaway Winners 🎉",
+            description="Here’s a record of our amazing community members who’ve snagged rewards from giveaways! 🏆",
+            color=discord.Color.purple()
+        )
+
         for winner in new_winners_data:
             user = bot.get_user(int(winner['user_id']))
             user_name = user.mention if user else f"User ID: {winner['user_id']}"
-            message_content += f"**{user_name}** won **{winner['points']:.2f} points**! (Reason: {winner['purpose']})\n"
+            embed.add_field(
+                name=f"✨ {user_name}",
+                value=f"**{winner['points']:.2f} points** 🎁\n*Reason:* {winner['purpose']}",
+                inline=False
+            )
+
+        embed.set_footer(text="Keep participating in giveaways for a chance to win! 🚀")
+        embed.timestamp = datetime.now(UTC)
 
         try:
-            message = await channel.send(message_content)
+            message = await channel.send(embed=embed)
             giveaway_history_message_id = message.id
-            # You should save this ID to a file to remember it on restart
+            # Save this ID to persist after restart
             # e.g., save_json_file({"giveaway_history_message_id": giveaway_history_message_id}, "message_ids.json")
         except discord.Forbidden:
-            print(f"Error: Bot does not have permissions to send messages in channel {channel.name}.")
+            print(f"Error: Bot does not have permissions to send embeds in channel {channel.name}.")
         return
 
     # If the history message already exists, fetch it and append
@@ -749,15 +841,47 @@ async def weekly_xp_bonus():
 
     reward_channel = bot.get_channel(XP_REWARD_CHANNEL_ID)
     if reward_channel:
-        msg = "**🎉 Top 3 XP Earners Bonus**\n"
+        # 🎉 First, ping all winners in a celebratory message
+        mentions = []
         for uid, _ in top_users:
             try:
                 user = await bot.fetch_user(int(uid))
-                msg += f"⭐ {user.mention} +200 points\n"
+                mentions.append(user.mention)
             except (discord.NotFound, discord.HTTPException):
-                msg += f"⭐ Unknown User (ID: {uid}) +200 points\n"
+                mentions.append(f"Unknown User (ID: {uid})")
+
+        if mentions:
+            await reward_channel.send(f"🔥 Congrats to Mana XP legends: {', '.join(mentions)} 🎉")
+
+        # 🏆 Then send the premium embed
+        embed = discord.Embed(
+            title="🏆 Weekly XP Rewards",
+            description="The **Top 3 XP Earners** of the week have been awarded their bonus! 🎉",
+            color=discord.Color.gold()
+        )
+
+        for idx, (uid, _) in enumerate(top_users, 1):
+            try:
+                user = await bot.fetch_user(int(uid))
+                embed.add_field(
+                    name=f"⭐ Rank #{idx}",
+                    value=f"{user.mention} — **+200 points**",
+                    inline=False
+                )
+            except (discord.NotFound, discord.HTTPException):
+                embed.add_field(
+                    name=f"⭐ Rank #{idx}",
+                    value=f"Unknown User (ID: {uid}) — **+200 points**",
+                    inline=False
+                )
+
+        embed.set_footer(text="Keep chatting, questing, and engaging to climb the ranks! 🚀")
+        embed.timestamp = datetime.now(UTC)
+
+        await reward_channel.send(embed=embed)
+
         try:
-            await reward_channel.send(msg)
+            await reward_channel.send(embed=embed)
         except discord.Forbidden:
             print(f"Bot missing permissions to send message to XP reward channel ({XP_REWARD_CHANNEL_ID}).")
     else:
@@ -804,6 +928,13 @@ async def on_member_join(member):
     if member.bot:
         return
 
+    # === NEW REFERRAL CHECK ===
+    user_id = str(member.id)
+    if user_id in referred_users:
+        print(f"User {member.name} has rejoined but has already been referred. Skipping referral check.")
+        return # Exit the function, user is not eligible for another bonus
+    # === END OF NEW CHECK ===
+
     guild = member.guild
     invites_after_join = await guild.invites()
     referrer = None
@@ -822,10 +953,9 @@ async def on_member_join(member):
         save_json_file(PENDING_REFERRALS_FILE, pending_referrals)
 
 
-# === MEMBER UPDATE FOR REWARD ===
 @bot.event
 async def on_member_update(before, after):
-    global user_points, referral_data, pending_referrals, admin_points
+    global user_points, referral_data, pending_referrals, admin_points, referred_users
 
     new_roles = [r for r in after.roles if r not in before.roles]
     if not new_roles:
@@ -839,16 +969,36 @@ async def on_member_update(before, after):
         if channel and referrer_id:
             try:
                 referrer = await bot.fetch_user(int(referrer_id))
-                await channel.send(
-                    f"🎉 Welcome {after.mention}! You were referred by {referrer.mention}. "
-                    "Your referrer will receive points once you get a paid role."
+                embed = discord.Embed(
+                    title="👋 Welcome to ManaVerse!",
+                    description=(
+                        f"🎉 {after.mention} just joined the community!\n\n"
+                        f"🙌 You were referred by {referrer.mention}.\n\n"
+                        f"💡 **Reminder:** {referrer.mention} will receive their referral reward "
+                        f"once {after.mention} gets a **paid role** in the server.\n\n"
+                        f"👉 To get started, check out <#{HOW_TO_JOIN_CHANNEL_ID}>."
+                    ),
+                    color=discord.Color.blue()
                 )
+                embed.set_thumbnail(url=after.avatar.url if after.avatar else None)
+                embed.set_footer(
+                    text="ManaVerse Referral System – Building stronger connections 💎"
+                )
+                embed.timestamp = datetime.now(UTC)
+
+                await channel.send(embed=embed)
+
             except discord.NotFound:
                 await channel.send(f"🎉 Welcome {after.mention}!")
         elif channel:
             await channel.send(f"🎉 Welcome {after.mention}!")
 
     if user_id not in pending_referrals:
+        return
+
+    # Check if the user has already received a referral bonus
+    if user_id in referred_users:
+        print(f"User {after.name} has already received a referral bonus. Skipping point award.")
         return
 
     referrer_id = pending_referrals[user_id]
@@ -925,17 +1075,35 @@ async def on_member_update(before, after):
     if awarded:
         # If the transaction was successful, save all files
         try:
+            # === NEW CODE TO SAVE REFERRED USER ===
+            referred_users[user_id] = True
+            save_json_file("referred_users.json", referred_users)
+            # =======================================
+
             del pending_referrals[user_id]
             save_json_file(REFERRALS_FILE, referral_data)
             save_json_file(PENDING_REFERRALS_FILE, pending_referrals)
 
             if channel:
                 referrer = await bot.fetch_user(int(referrer_id))
-                await channel.send(
-                    f"🎉 {referrer.mention} has been awarded **{referrer_points:.2f} points** "
-                    f"and {after.mention} has been awarded **{new_member_points:.2f} points** "
-                    f"for a successful referral!"
+                embed = discord.Embed(
+                    title="🎉 Successful Referral!",
+                    description=(
+                        f"🔥 {referrer.mention} just referred {after.mention}!\n\n"
+                        f"💰 **Rewards Distributed:**\n"
+                        f"• {referrer.mention} earned **{referrer_points:.2f} points** 🪙\n"
+                        f"• {after.mention} earned **{new_member_points:.2f} points** 🎁"
+                    ),
+                    color=discord.Color.green()
                 )
+                embed.set_thumbnail(url=after.avatar.url if after.avatar else None)
+                embed.set_footer(
+                    text="ManaVerse Referral System – Keep growing the community 🚀"
+                )
+                embed.timestamp = datetime.now(UTC)
+
+                await channel.send(embed=embed)
+
         except Exception as e:
             print(f"❌ An error occurred while saving files: {e}")
 
@@ -953,17 +1121,19 @@ async def on_member_update(before, after):
         if verified_role in before.roles and verified_role not in after.roles:
             try:
                 # Create a list of roles to remove
-                roles_to_remove = [role for role in after.roles if role.id != after.guild.default_role.id]
+                roles_to_remove = []
+                for role in after.roles:
+                    # Exclude the @everyone role to avoid errors
+                    if role.id != after.guild.default_role.id:
+                        roles_to_remove.append(role)
 
                 # Remove all roles from the member
-                for role in roles_to_remove:
-                    await after.remove_roles(role, reason="Verified role was removed.")
+                await after.remove_roles(*roles_to_remove, reason="Verified role was removed.")
 
                 print(f"Removed all roles from {after.name} because their verified role was removed.")
 
             except discord.Forbidden:
                 print(f"Permission error: Bot could not remove roles from {after.name}.")
-
 
 
 def get_referral_leaderboard_content(referral_data):
@@ -1102,6 +1272,66 @@ async def invite_link(ctx):
         await ctx.message.delete(delay=5)
     except discord.Forbidden:
         print(f"❌ Bot missing permissions to delete command message in channel '{ctx.channel.name}'.")
+
+
+@bot.command(name="ref")
+@commands.cooldown(1, 60, commands.BucketType.user)
+async def ref_command(ctx):
+    """
+    Shows the user a list of people they have successfully referred.
+    This command is restricted to the referral channel.
+    """
+    # Delete the user's command message
+    try:
+        await ctx.message.delete()
+    except discord.Forbidden:
+        pass  # Bot doesn't have permissions to delete the message
+
+    # Channel Restriction Check
+    if ctx.channel.id != REFERRAL_CHANNEL_ID:
+        try:
+            await ctx.send(
+                f"❌ This command can only be used in the <#{REFERRAL_CHANNEL_ID}> channel.",
+                delete_after=10
+            )
+        except discord.Forbidden:
+            pass
+        return
+
+    referrer_id = str(ctx.author.id)
+    referred_members = []
+
+    # Iterate through the referral data to find the user's referrals
+    for user_id, ref_id in referral_data.items():
+        if ref_id == referrer_id:
+            referred_members.append(user_id)
+
+    if not referred_members:
+        await ctx.send(
+            "You have not referred anyone yet. Share your invite link to get started!",
+            delete_after=40  # Deletes this message after 40 seconds
+        )
+        return
+
+    # Create an embed to display the list of referrals
+    embed = discord.Embed(
+        title="👥 Your Referrals",
+        description="Here is a list of members you have successfully referred:",
+        color=discord.Color.blue()
+    )
+
+    referral_list = ""
+    for referred_id in referred_members:
+        try:
+            user = await bot.fetch_user(int(referred_id))
+            referral_list += f"• {user.name}\n"
+        except discord.NotFound:
+            referral_list += f"• Unknown User (ID: {referred_id})\n"
+
+    embed.add_field(name="Referred Users", value=referral_list, inline=False)
+    embed.set_footer(text=f"Total Referrals: {len(referred_members)}")
+
+    await ctx.send(embed=embed, delete_after=40)  # Deletes this message after 40 seconds
 
 
 #---------------------------------------------------------------------------------------------------
@@ -1845,7 +2075,7 @@ async def update_points_leaderboard():
 @bot.command(name="rank")
 @commands.cooldown(1, 60, commands.BucketType.user)
 async def rank(ctx):
-    """Shows the user's rank and the top 10 leaderboard."""
+    """Shows the user's rank and the top 10 leaderboards."""
 
     if ctx.channel.id != LEADERBOARD_CHANNEL_ID:
         try:
@@ -1932,7 +2162,7 @@ async def rank(ctx):
         text="Grind, engage, and claim your spot at the top!",
         icon_url=ctx.guild.icon.url if ctx.guild.icon else None
     )
-    embed.timestamp = datetime.utcnow()
+    embed.timestamp = datetime.now(UTC)
 
     await ctx.send(embed=embed)
 
@@ -1972,7 +2202,7 @@ async def leaderboard(ctx):
         return
 
     sorted_users = sorted(eligible_users.items(), key=lambda item: item[1]['all_time_points'], reverse=True)
-    msg = "**🏆 Top 10 Odogwu Leaders (All-Time Points) 🏆**\n"
+    msg = "**🏆 Top 10 ManaVerse Leaders 🏆**\n"
     leaderboard_entries = []
 
     for i, (user_id, data) in enumerate(sorted_users[:10]):
@@ -2473,7 +2703,7 @@ async def verifyquest(ctx, member: discord.Member, quest_number: int, action: st
     """
     (Moderator Only) Verifies a submitted quest.
     This command is restricted to a specific moderator channel to prevent misuse.
-    Usage: !verifyquest <@member> <quest_number> <approve|reject>
+    Usage: !verify-quest <@member> <quest_number> <approve|reject>
     """
     if ctx.channel.id != MOD_QUEST_REVIEW_CHANNEL_ID:
         try:
@@ -2580,7 +2810,7 @@ async def on_message(message):
     if message.channel.id == GM_G1ST_CHANNEL_ID:
         content = message.content.lower()
 
-        if "gm" in content or "g1st" in content:
+        if "gm" in content or "mv" in content:
             user_id = str(message.author.id)
             today = str(datetime.now().date())
 
@@ -2675,7 +2905,7 @@ async def on_message(message):
                 print(f"Bot missing permissions to delete or send message in {message.channel.name} (VIP restriction).")
             return
         else:
-            # The user has the VIP role (and is not a mod or admin), so apply the post limit
+            # The user has the VIP role (and is not a mod or admin), so apply the post-limit
             user_id = str(member.id)
             vip_posts[user_id] = vip_posts.get(user_id, 0) + 1
             save_vip_posts()
@@ -2926,7 +3156,7 @@ async def cmd_mysterybox(ctx: commands.Context):
     )
     embed.add_field(name="Reward", value=f"💎 **{reward} points**", inline=False)
     embed.set_footer(text="Good luck next time!" if reward < MYSTERYBOX_COST else "Nice hit!")
-    embed.timestamp = datetime.utcnow()
+    embed.timestamp = datetime.now(UTC)
     await ctx.send(embed=embed)
 
 

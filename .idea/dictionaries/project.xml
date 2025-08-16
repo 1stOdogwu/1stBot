@@ -2,10 +2,15 @@
   <dictionary name="project">
     <words>
       <w>addpoints</w>
+      <w>confirmpayout</w>
       <w>myrank</w>
       <w>mysterybox</w>
+      <w>newcommand</w>
       <w>odogwu</w>
       <w>odogwutivated</w>
+      <w>requestpayout</w>
+      <w>submitquest</w>
+      <w>verifyquest</w>
     </words>
   </dictionary>
 </component>
