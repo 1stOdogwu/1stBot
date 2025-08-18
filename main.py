@@ -1,5 +1,7 @@
 import json
 import logging
+import psycopg2
+from psycopg2 import sql
 import os
 import random
 import re
@@ -15,6 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Ensure DISCORD_TOKEN is loaded
 if not token:
@@ -64,30 +67,53 @@ xp_leaderboard_message_id = None
 
 
 # --- Helper Functions for Loading Data ---
-def load_json_file_with_dict_defaults(filename, default_value):
-    """Loads a JSON file, initializing with a default dictionary if not found."""
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            # Add missing keys from the default value
-            for key, value in default_value.items():
-                if key not in data:
-                    data[key] = value
-            return data
-    except (FileNotFoundError, json.JSONDecodeError):
-        # The File wasn't found or is empty/malformed, return the default value
-        return default_value
+def get_db_connection():
+    """Establishes and returns a database connection."""
+    conn = psycopg2.connect(DATABASE_URL)
+    return conn
 
-def load_json_file_with_list_defaults(filename, default_value):
-    """Loads a JSON file, initializing with a default list if not found."""
+def load_data(table_name, default_value):
+    """Loads data from a specified database table. Returns a default value if no data is found."""
+    conn = None
+    data = default_value
     try:
-        with open(filename, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data
-    except (FileNotFoundError, json.JSONDecodeError):
-        # The File isn't found or is empty/malformed, return the default value
-        return default_value
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Securely create the table using a parameter
+        cur.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} (id INTEGER PRIMARY KEY, data JSONB);").format(sql.Identifier(table_name)))
+        # Securely select data using a parameter
+        cur.execute(sql.SQL("SELECT data FROM {} WHERE id = 1;").format(sql.Identifier(table_name)))
+        result = cur.fetchone()
+        if result:
+            data = result[0]
+        cur.close()
+    except Exception as e:
+        print(f"Error loading data from {table_name}: {e}")
+    finally:
+        if conn:
+            conn.close()
+    return data
 
+def save_data(table_name, data):
+    """Saves data to a specified database table."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Securely create the table using a parameter
+        cur.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} (id INTEGER PRIMARY KEY, data JSONB);").format(sql.Identifier(table_name)))
+        # Securely insert/update data using a parameter
+        cur.execute(
+            sql.SQL("INSERT INTO {} (id, data) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data;").format(sql.Identifier(table_name)),
+            (json.dumps(data),)
+        )
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        print(f"Error saving data to {table_name}: {e}")
+    finally:
+        if conn:
+            conn.close()
 
 # --- Global Variables ---
 invite_cache = {}
@@ -97,66 +123,83 @@ ticket_messages_to_archive = {}
 # Initial Total Supply of points
 TOTAL_SUPPLY = 10_000_000_000.0
 
-# --- Helper Functions for Saving Data ---
-def save_json_file(filename, data):
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+
+# --- Helper Functions for Saving Data to the Database ---
 
 def save_points():
-    save_json_file(POINTS_FILE, user_points)
+    """Saves the user_points dictionary to the database."""
+    save_data("user_points_table", user_points)
 
 def save_submissions():
-    save_json_file(SUBMISSIONS_FILE, submissions)
+    """Saves the submission dictionary to the database."""
+    save_data("submissions_table", submissions)
 
 def save_command_logs():
-    save_json_file(LOG_FILE, logs)
+    """Saves the command_logs dictionary to the database."""
+    save_data("logs_table", logs)
 
 def save_vip_posts():
-    save_json_file(VIP_POSTS_FILE, vip_posts)
+    """Saves the vip_posts dictionary to the database."""
+    save_data("vip_posts_table", vip_posts)
 
 def save_xp():
-    save_json_file(XP_FILE, user_xp)
+    """Saves the user_xp dictionary to the database."""
+    save_data("user_xp_table", user_xp)
 
 def save_weekly_quests():
-    save_json_file(QUESTS_FILE, weekly_quests)
+    """Saves the weekly_quests dictionary to the database."""
+    save_data("weekly_quests_table", weekly_quests)
 
 def save_quest_submissions():
-    save_json_file(QUEST_SUBMISSIONS_FILE, quest_submissions)
+    """Saves the quest_submissions dictionary to the database."""
+    save_data("quest_submissions_table", quest_submissions)
 
 def save_approved_proofs():
-    save_json_file(APPROVED_PROOFS_FILE, approved_proofs)
+    """Saves the approved_proofs list to the database."""
+    save_data("approved_proofs_table", approved_proofs)
 
 def save_gm_log():
-    save_json_file(GM_LOG_FILE, gm_log)
+    """Saves the gm_log dictionary to the database."""
+    save_data("gm_log_table", gm_log)
 
 def save_processed_reactions():
-    save_json_file(list(PROCESSED_REACTIONS_FILE), processed_reactions)
+    """Save the processed_reactions set to the database."""
+    # Note: We need to convert the set back to a list to save it in the database.
+    save_data("processed_reactions_table", list(processed_reactions))
 
-# The corrected helper function
 def save_giveaway_log():
-    save_json_file(GIVEAWAY_LOG_FILE, giveaway_winners_log)
+    """Saves the giveaway_winners_log list to the database."""
+    save_data("giveaway_logs_table", giveaway_winners_log)
 
-# This was also bugged, calling itself recursively.
 def save_giveaway_all_time():
-    save_json_file(GIVEAWAY_ALL_TIME_LOG_FILE, all_time_giveaway_winners_log)
+    """Saves the all_time_giveaway_winners_log list to the database."""
+    save_data("all_time_giveaway_logs_table", all_time_giveaway_winners_log)
 
 def save_referrals():
-    save_json_file(REFERRALS_FILE, referral_data)
+    """Saves the referral_data dictionary to the database."""
+    save_data("referral_data_table", referral_data)
 
 def save_pending_referrals():
-    save_json_file(PENDING_REFERRALS_FILE, pending_referrals)
+    """Saves the pending_referrals dictionary to the database."""
+    save_data("pending_referrals_table", pending_referrals)
 
 def save_points_history():
-    save_json_file(POINTS_HISTORY_FILE, points_history)
+    """Saves the points_history list to the database."""
+    save_data("points_history_table", points_history)
 
 def save_active_tickets():
-    save_json_file(ACTIVE_TICKETS_FILE, active_tickets)
+    """Saves the active_tickets dictionary to the database."""
+    save_data("active_tickets_table", active_tickets)
 
 def save_mysterybox_uses():
-    save_json_file(MYSTERYBOX_USES_FILE, mysterybox_uses)
+    """Saves the mysterybox_uses dictionary to the database."""
+    save_data("mysterybox_uses_table", mysterybox_uses)
 
 def save_referred_users():
-    save_json_file(REFERRED_USERS_FILE, referred_users)
+    """Saves the referred_users set to the database."""
+    # Note: We need to convert the set back to a list to save it in the database.
+    save_data("referred_users_table", list(referred_users))
+
 
 def ensure_user(user_id: str):
     """Ensures a user has an entry in the user_points dictionary."""
@@ -172,36 +215,45 @@ def admin_can_issue(amount: float) -> bool:
     return admin_points["balance"] >= amount
 
 
-
 # --- Load files that are DICTIONARIES ---
-user_points = load_json_file_with_dict_defaults(POINTS_FILE, {})
-submissions = load_json_file_with_dict_defaults(QUEST_SUBMISSIONS_FILE, {})
-logs = load_json_file_with_dict_defaults(LOG_FILE, {})
-vip_posts = load_json_file_with_dict_defaults(VIP_POSTS_FILE, {})
-user_xp = load_json_file_with_dict_defaults(XP_FILE, {})
-weekly_quests = load_json_file_with_dict_defaults(QUESTS_FILE, {"week": 0, "quests": []})
-quest_submissions = load_json_file_with_dict_defaults(SUBMISSIONS_FILE, {})
-gm_log = load_json_file_with_dict_defaults(GM_LOG_FILE, {})
-admin_points = load_json_file_with_dict_defaults(ADMIN_POINTS_FILE, {
-    "total_supply": TOTAL_SUPPLY,
-    "balance": TOTAL_SUPPLY,
-    "claimed_points": 0.0,
-    "burned_points": 0.0,
-    "my_points": 0.0,
-    "fees_earned": 0.0
-})
-referral_data = load_json_file_with_dict_defaults(REFERRALS_FILE, {})
-pending_referrals = load_json_file_with_dict_defaults(PENDING_REFERRALS_FILE, {})
-active_tickets = load_json_file_with_dict_defaults(ACTIVE_TICKETS_FILE, {})
-mysterybox_uses = load_json_file_with_dict_defaults(MYSTERYBOX_USES_FILE, {})
-referred_users = load_json_file_with_dict_defaults(REFERRED_USERS_FILE, {})
+user_points = load_data("user_points_table", {})
+submissions = load_data("submissions_table", {})
+logs = load_data("logs_table", {})
+vip_posts = load_data("vip_posts_table", {})
+user_xp = load_data("user_xp_table", {})
+weekly_quests = load_data("weekly_quests_table", {"week": 0, "quests": []})
+quest_submissions = load_data("quest_submissions_table", {})
+gm_log = load_data("gm_log_table", {})
+
+# CRITICAL CHANGE: This ensures your admin data does not reset on every restart.
+# We load the data first and then add default values only if they don't exist.
+admin_points = load_data("admin_points_table", {})
+if "total_supply" not in admin_points:
+    admin_points = {
+        "total_supply": 10000000000.0,
+        "balance": 10000000000.0,
+        "claimed_points": 0.0,
+        "burned_points": 0.0,
+        "my_points": 0.0,
+        "fees_earned": 0.0
+    }
+    # save_data("admin_points_table", admin_points)
+    # Remember to uncomment save_data("admin_points_table", admin_points) after this initial run
+
+referral_data = load_data("referral_data_table", {})
+pending_referrals = load_data("pending_referrals_table", {})
+active_tickets = load_data("active_tickets_table", {})
+mysterybox_uses = load_data("mysterybox_uses_table", {})
 
 # --- Load files that are LISTS ---
-approved_proofs = load_json_file_with_list_defaults(APPROVED_PROOFS_FILE, [])
-points_history = load_json_file_with_list_defaults(POINTS_HISTORY_FILE, [])
-giveaway_winners_log = load_json_file_with_list_defaults(GIVEAWAY_LOG_FILE, [])
-all_time_giveaway_winners_log = load_json_file_with_list_defaults(GIVEAWAY_ALL_TIME_LOG_FILE, [])
-processed_reactions = set(load_json_file_with_list_defaults('processed_reactions.json', []))
+approved_proofs = load_data("approved_proofs_table", [])
+points_history = load_data("points_history_table", [])
+giveaway_winners_log = load_data("giveaway_logs_table", [])
+all_time_giveaway_winners_log = load_data("all_time_giveaway_logs_table", [])
+
+# --- Load files that are SETS ---
+referred_users = set(load_data("referred_users_table", []))
+processed_reactions = set(load_data("processed_reactions_table", []))
 
 print(f"POINTS_FILE type: {type(POINTS_FILE)}")
 print(f"user_points type: {type(user_points)}")
@@ -354,16 +406,6 @@ async def on_ready():
     except (FileNotFoundError, json.JSONDecodeError):
         gm_log = {}
 
-    # NEW: Load admin's point data and initialize if the file doesn't exist
-    admin_points = load_json_file_with_dict_defaults(ADMIN_POINTS_FILE, {
-        "total_supply": TOTAL_SUPPLY,
-        "balance": TOTAL_SUPPLY,
-        "claimed_points": 0.0,
-        "burned_points": 0.0,
-        "my_points": 0.0,
-        "fees_earned": 0.0
-    })
-
         # NEW: Load invites from cache
     for guild in bot.guilds:
         try:
@@ -375,7 +417,7 @@ async def on_ready():
     if not update_leaderboards.is_running():
         update_leaderboards.start()
 
-    processed_reactions = set(load_json_file_with_list_defaults('processed_reactions.json', []))
+    processed_reactions = set(load_data("processed_reactions_table", []))
 
     print(f"✅ Bot is live as {bot.user} (ID: {bot.user.id})")
     print("✅ Invite cache loaded and points loaded.")
@@ -400,7 +442,7 @@ async def log_points_transaction(user_id, points, purpose):
         "timestamp": datetime.now().isoformat()
     }
     points_history.append(new_entry)
-    save_json_file(POINTS_HISTORY_FILE, points_history)
+    save_data("points_history_table", points_history)
 
     # --- ADD THIS BLOCK FOR BURN LOGS ---
     # Send a separate log to the burn channel for burn transactions
@@ -769,7 +811,7 @@ async def update_giveaway_winners_history():
 
     # Once the message is updated, clear the temporary log file only
     giveaway_winners_log.clear()
-    save_json_file(GIVEAWAY_LOG_FILE, giveaway_winners_log)
+    save_data("giveaway_logs_table", giveaway_winners_log)
     print("✅ Giveaway history updated and temporary log cleared.")
 
 
@@ -778,14 +820,14 @@ async def append_new_winner_to_history():
     Moves winners from the temporary giveaway log to the permanent history log.
     """
     # Load winners from the temporary log using your helper function
-    temporary_winners = load_json_file_with_list_defaults("giveaway_log.json", [])
+    temporary_winners = load_data("giveaway_logs_table", [])
 
     # If the temporary file is empty, there's nothing to do.
     if not temporary_winners:
         return
 
     # Load the permanent all-time winners log
-    all_time_winners = load_json_file_with_list_defaults("giveaway_all_time.json", [])
+    all_time_winners = load_data("all_time_giveaway_logs_table", [])
 
     # Append the new winners to the all-time log
     all_time_winners.extend(temporary_winners)
@@ -796,10 +838,10 @@ async def append_new_winner_to_history():
         del all_time_winners[:entries_to_remove]
 
     # Save the updated all-time winners log using your save function
-    save_json_file("giveaway_all_time.json", all_time_winners)
+    save_data("all_time_giveaway_logs_table", all_time_giveaway_winners_log)
 
     # Clear the temporary giveaway log for the next giveaway
-    save_json_file("giveaway_log.json", [])
+    save_data("giveaway_logs_table", giveaway_winners_log)
 
     print("New winners appended to the all-time log and temporary log cleared.")
 
@@ -848,7 +890,7 @@ async def weekly_xp_bonus():
         # --- NEW LINE ---
         await log_points_transaction(user_id, 200.0, "Weekly XP bonus")
 
-        save_json_file(user_points, "user_points.json")
+        save_data("user_points_table", user_points)
 
     # NEW: Deduct points from the admin's balance and update claimed points
     admin_points["balance"] -= points_to_award
@@ -856,7 +898,7 @@ async def weekly_xp_bonus():
 
     save_points()
     # NEW: Save the updated admin points
-    save_json_file(ADMIN_POINTS_FILE, admin_points)
+    save_data("admin_points_table", admin_points)
 
     reward_channel = bot.get_channel(XP_REWARD_CHANNEL_ID)
     if reward_channel:
@@ -976,7 +1018,7 @@ async def on_member_join(member):
 
     if referrer and referrer.id != bot.user.id:
         pending_referrals[str(member.id)] = str(referrer.id)
-        save_json_file(PENDING_REFERRALS_FILE, pending_referrals)
+        save_data("pending_referrals_table", pending_referrals)
         print(f"New pending referral for {member.name}. Referrer: {referrer.name}")
 
         # Send a confirmation to the referrer
@@ -1074,7 +1116,7 @@ async def on_member_update(before, after):
                 user_points[referrer_id]["all_time_points"] += referrer_points
                 user_points[referrer_id]["available_points"] += referrer_points
 
-                save_json_file(POINTS_FILE, user_points)
+                save_data("user_points_table", user_points)
 
                 referral_data[user_id] = referrer_id
 
@@ -1082,7 +1124,7 @@ async def on_member_update(before, after):
                 admin_points["balance"] -= total_points_to_award
                 admin_points["claimed_points"] += total_points_to_award
 
-                save_json_file(ADMIN_POINTS_FILE, admin_points)
+                save_data("admin_points_table", admin_points)
 
                 # Log the transactions
                 referrer_member_obj = await bot.fetch_user(int(referrer_id))
@@ -1116,13 +1158,13 @@ async def on_member_update(before, after):
         # If the transaction was successful, save all files
         try:
             # === NEW CODE TO SAVE REFERRED USER ===
-            referred_users[user_id] = True
-            save_json_file("referred_users.json", referred_users)
+            referred_users.add(user_id)
+            save_data("referred_users_table", list(referred_users))
             # =======================================
 
             del pending_referrals[user_id]
-            save_json_file(REFERRALS_FILE, referral_data)
-            save_json_file(PENDING_REFERRALS_FILE, pending_referrals)
+            save_data("referral_data_table", referral_data)
+            save_data("pending_referrals_table", pending_referrals)
 
             if channel:
                 referrer = await bot.fetch_user(int(referrer_id))
@@ -1609,9 +1651,9 @@ async def on_reaction_add(reaction, user):
         processed_reactions.add(reaction_identifier)
 
         # Save all data files
-        save_json_file(POINTS_FILE, user_points)
-        save_json_file(ADMIN_POINTS_FILE, admin_points)
-        save_json_file(PROCESSED_REACTIONS_FILE, list(processed_reactions))
+        save_data("user_points_table", user_points)
+        save_data("admin_points_table", admin_points)
+        save_data("processed_reactions_table", list(processed_reactions))
 
         # --- Refactored Confirmation Message with an Embed ---
         embed = discord.Embed(
@@ -1894,11 +1936,11 @@ async def verify(ctx, member: discord.Member, action: str):
         user_points[user_id]["all_time_points"] += points_to_award
         user_points[user_id]["available_points"] += points_to_award
         await log_points_transaction(user_id, points_to_award, f"Task submission approved")
-        save_json_file(POINTS_FILE, user_points)
+        save_data("user_points_table", user_points)
 
         admin_points["balance"] -= points_to_award
         admin_points["claimed_points"] += points_to_award
-        save_json_file(ADMIN_POINTS_FILE, admin_points)
+        save_data("admin_points_table", admin_points)
 
         for url in submission.get("normalized_proof_urls", []):
             if url not in approved_proofs:
@@ -2213,13 +2255,11 @@ async def addpoints(ctx, members: commands.Greedy[discord.Member], points_to_add
     admin_points["balance"] -= total_points
     admin_points["claimed_points"] += total_points
 
-    save_json_file(POINTS_FILE, user_points)
-    save_json_file(ADMIN_POINTS_FILE, admin_points)
-    save_json_file(GIVEAWAY_LOG_FILE, giveaway_winners_log)
-    save_json_file(GIVEAWAY_ALL_TIME_LOG_FILE, all_time_giveaway_winners_log)
-
+    save_data("user_points_table", user_points)
+    save_data("admin_points_table", admin_points)
+    save_data("giveaway_logs_table", giveaway_winners_log)
+    save_data("all_time_giveaway_logs_table", all_time_giveaway_winners_log)
     await append_new_winner_to_history(new_winners_data)
-
     embed = discord.Embed(
         title="🎉 Points Awarded!",
         description=f"The following user(s) have been awarded points:",
@@ -2320,13 +2360,13 @@ async def addpoints_flex(ctx, *args):
 
             winners_list.append(f"{member.mention} ({points:.2f})")
 
-        save_json_file(POINTS_FILE, user_points)
-        save_json_file(GIVEAWAY_LOG_FILE, giveaway_winners_log)
-        save_json_file(GIVEAWAY_ALL_TIME_LOG_FILE, all_time_giveaway_winners_log)
+        save_data("user_points_table", user_points)
+        save_data("giveaway_logs_table", giveaway_winners_log)
+        save_data("all_time_giveaway_logs_table", all_time_giveaway_winners_log)
 
         admin_points["balance"] -= total_points
         admin_points["claimed_points"] += total_points
-        save_json_file(ADMIN_POINTS_FILE, admin_points)
+        save_data("admin_points_table", admin_points)
 
         await update_giveaway_winners_history()
 
@@ -2805,7 +2845,7 @@ async def paid(ctx, member: discord.Member):
             admin_points["balance"] -= requested_amount
             admin_points["burned_points"] = admin_points.get("burned_points", 0) + requested_amount
             admin_points["fees_earned"] = admin_points.get("fees_earned", 0) + fee
-            save_json_file(ADMIN_POINTS_FILE, admin_points)
+            save_data("admin_points_table", admin_points)
 
             # Clear the pending payout
             del user_data["pending_payout"]
@@ -3265,11 +3305,11 @@ async def verifyquest(ctx, member: discord.Member, quest_number: int, action: st
         quest_data[str(quest_number)]["status"] = "approved"
 
         await log_points_transaction(user_id, points_to_award, f"Quest {quest_number} approval")
-        save_json_file(POINTS_FILE, user_points)
+        save_data("user_points_table", user_points)
 
         admin_points["balance"] -= points_to_award
         admin_points["claimed_points"] += points_to_award
-        save_json_file(ADMIN_POINTS_FILE, admin_points)
+        save_data("admin_points_table", admin_points)
 
         if "normalized_tweet" in quest_data[str(quest_number)]:
             normalized_url = quest_data[str(quest_number)]["normalized_tweet"]
@@ -3362,7 +3402,7 @@ async def on_message(message):
                         admin_points["balance"] -= GM_G1ST_POINTS_REWARD
                         admin_points["my_points"] += GM_G1ST_POINTS_REWARD
                         admin_points["claimed_points"] += GM_G1ST_POINTS_REWARD
-                        save_json_file(ADMIN_POINTS_FILE, admin_points)
+                        save_data("admin_points_table", admin_points)
 
                         await log_points_transaction(user_id, GM_G1ST_POINTS_REWARD, "GM points")
 
@@ -3375,17 +3415,17 @@ async def on_message(message):
                         user_data = user_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
                         user_data["all_time_points"] += GM_G1ST_POINTS_REWARD
                         user_data["available_points"] += GM_G1ST_POINTS_REWARD
-                        save_json_file(POINTS_FILE, user_points)
+                        save_data("user_points_table", user_points)
 
                         admin_points["balance"] -= GM_G1ST_POINTS_REWARD
                         admin_points["claimed_points"] += GM_G1ST_POINTS_REWARD
-                        save_json_file(ADMIN_POINTS_FILE, admin_points)
+                        save_data("admin_points_table", admin_points)
 
                         await log_points_transaction(user_id, GM_G1ST_POINTS_REWARD, "GM points")
 
                     # Log that the user received points for today
                     gm_log[user_id] = today
-                    save_json_file(GM_LOG_FILE, gm_log)
+                    save_data("gm_log_table", gm_log)
 
                     # --- Send the premium embed ---
                     embed = discord.Embed(
@@ -3580,7 +3620,7 @@ async def on_message(message):
                 await message.delete()
 
                 active_tickets[ticket_channel.id] = user.id
-                save_json_file(ACTIVE_TICKETS_FILE, active_tickets)
+                save_data("active_tickets_table", active_tickets)
 
             except discord.Forbidden:
                 print("Bot is missing permissions to create channels or manage roles.")
@@ -3638,7 +3678,7 @@ async def close(ctx):
         await ctx.send("This ticket has been closed and will be deleted in 30 days.")
 
         del active_tickets[ticket_channel_id]
-        save_json_file(ACTIVE_TICKETS_FILE, active_tickets)
+        save_data("active_tickets_table", active_tickets)
 
     except discord.Forbidden:
         print("Bot is missing permissions to modify the ticket channel.")
@@ -3693,14 +3733,14 @@ def _mb_get_uses_in_last_24h(uid: str) -> int:
     cutoff = time.time() - 24 * 3600
     ts_list = [t for t in ts_list if t >= cutoff]
     mysterybox_uses[uid] = ts_list
-    save_json_file(MYSTERYBOX_USES_FILE, mysterybox_uses)
+    save_data("mysterybox_uses_table", mysterybox_uses)
     return len(ts_list)
 
 def _mb_add_use(uid: str):
     ts_list = mysterybox_uses.get(uid, [])
     ts_list.append(time.time())
     mysterybox_uses[uid] = ts_list
-    save_json_file(MYSTERYBOX_USES_FILE, mysterybox_uses)
+    save_data("mysterybox_uses_table", mysterybox_uses)
 
 @bot.command(name="mysterybox")
 async def cmd_mysterybox(ctx: commands.Context):
@@ -3731,7 +3771,7 @@ async def cmd_mysterybox(ctx: commands.Context):
     # Deduct cost from user's available points
     ensure_user(user_id)
     user_points[user_id]["available_points"] -= MYSTERYBOX_COST
-    save_json_file(POINTS_FILE, user_points)
+    save_data("user_points_table", user_points)
 
     # Draw reward
     reward = random.choices(MYSTERYBOX_REWARDS, weights=MYSTERYBOX_WEIGHTS, k=1)[0]
@@ -3740,7 +3780,7 @@ async def cmd_mysterybox(ctx: commands.Context):
     # We always credit the reward amount to the user balance:
     user_points[user_id]["available_points"] += reward
     user_points[user_id]["all_time_points"] += reward  # reflect gross credited to the user
-    save_json_file(POINTS_FILE, user_points)
+    save_data("user_points_table", user_points)
 
     # Economy accounting:
     # - If reward > cost: the extra (reward - cost) is newly issued by admin → reduce admin balance & increase claimed_points
@@ -3755,7 +3795,7 @@ async def cmd_mysterybox(ctx: commands.Context):
             # If somehow admin cannot cover, fallback: undo the extra above cost
             user_points[user_id]["available_points"] -= delta
             user_points[user_id]["all_time_points"] -= delta
-            save_json_file(POINTS_FILE, user_points)
+            save_data("user_points_table", user_points)
             reward = MYSTERYBOX_COST  # clamp to avoid inflation
     elif reward < MYSTERYBOX_COST:
         burn = MYSTERYBOX_COST - reward
@@ -3763,7 +3803,7 @@ async def cmd_mysterybox(ctx: commands.Context):
         admin_points["claimed_points"] -= burn
         await log_points_transaction(bot.user.id, float(burn), f"Mystery Box: {ctx.author.name} (burn)")
 
-    save_json_file(ADMIN_POINTS_FILE, admin_points)
+    save_data("admin_points_table", admin_points)
 
     # Log transactions (to your central logger)
     # Log net results as: +reward (credit) and -cost (spend)
