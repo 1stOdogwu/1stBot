@@ -11,6 +11,7 @@
       <w>requestpayout</w>
       <w>submitquest</w>
       <w>verifyquest</w>
+      <w>vpts</w>
     </words>
   </dictionary>
 </component>
