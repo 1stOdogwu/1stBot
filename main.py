@@ -227,8 +227,15 @@ gm_log = load_data("gm_log_table", {})
 
 # CRITICAL CHANGE: This ensures your admin data does not reset on every restart.
 # We load the data first and then add default values only if they don't exist.
-admin_points = load_data("admin_points_table", {})
-save_data("admin_points_table", admin_points)
+admin_points = load_data("admin_points_table", {
+    "total_supply": 10000000000.0,
+    "balance": 10000000000.0,
+    "claimed_points": 0.0,
+    "burned_points": 0.0,
+    "my_points": 0.0,
+    "fees_earned": 0.0
+})
+    # save_data("admin_points_table", admin_points)
     # Remember to uncomment save_data("admin_points_table", admin_points) after this initial run
 
 referral_data = load_data("referral_data_table", {})
