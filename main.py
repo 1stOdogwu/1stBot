@@ -228,16 +228,7 @@ gm_log = load_data("gm_log_table", {})
 # CRITICAL CHANGE: This ensures your admin data does not reset on every restart.
 # We load the data first and then add default values only if they don't exist.
 admin_points = load_data("admin_points_table", {})
-if "total_supply" not in admin_points:
-    admin_points = {
-        "total_supply": 10000000000.0,
-        "balance": 10000000000.0,
-        "claimed_points": 0.0,
-        "burned_points": 0.0,
-        "my_points": 0.0,
-        "fees_earned": 0.0
-    }
-    # save_data("admin_points_table", admin_points)
+save_data("admin_points_table", admin_points)
     # Remember to uncomment save_data("admin_points_table", admin_points) after this initial run
 
 referral_data = load_data("referral_data_table", {})
@@ -269,7 +260,7 @@ COMMAND_LOG_CHANNEL = 1401443654371115018
 ENGAGEMENT_CHANNEL_ID = 1399127357595582616
 FIRST_ODOGWU_CHANNEL_ID = 1402065169890148454
 GIVEAWAY_CHANNEL_ID = 1402371502875218032
-GM_G1ST_CHANNEL_ID = 1402045203262603375
+GM_MV_CHANNEL_ID = 1402045203262603375
 HOW_TO_JOIN_CHANNEL_ID = 1399097281428324362
 LEADERBOARD_CHANNEL_ID = 1399125979644821574
 MOD_PAYMENT_REVIEW_CHANNEL_ID = 1400522100078280815
@@ -294,7 +285,7 @@ MIN_PAYOUT_AMOUNT = 5000.0  # New minimum payout amount
 PAYOUT_FEE_PERCENTAGE = 10
 CONFIRMATION_TIMEOUT = 30
 POINTS_TO_USD = 0.0005
-GM_G1ST_POINTS_REWARD = 150.0
+GM_MV_POINTS_REWARD = 150.0
 APPROVED_EXCHANGES = ["binance", "bitget", "bybit", "mexc", "bingx"]
 
 #MYSTERY-BOX CONFIGURATION CONSTANTS
@@ -399,7 +390,7 @@ async def on_ready():
     except (FileNotFoundError, json.JSONDecodeError):
         command_logs = {}
 
-    # Load the GM/G1st log file
+    # Load the GM/MV log file
     try:
         with open(GM_LOG_FILE, "r") as f:
             gm_log = json.load(f)
@@ -3378,15 +3369,15 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # --- 1. GM/G1st Points Feature ---
-    if message.channel.id == GM_G1ST_CHANNEL_ID:
+    # --- 1. GM/MV Points Feature ---
+    if message.channel.id == GM_MV_CHANNEL_ID:
         content = message.content.lower()
 
         # You will need to import these at the top of your script
         # from datetime import datetime, UTC
         # import discord
 
-        if "gm" in content or "g1st" in content:
+        if "gm" in content or "mv" in content:
             user_id = str(message.author.id)
             today = str(datetime.now().date())
 
@@ -3399,29 +3390,29 @@ async def on_message(message):
                 try:
                     if is_admin:
                         # Award points to the Admin's personal balance
-                        admin_points["balance"] -= GM_G1ST_POINTS_REWARD
-                        admin_points["my_points"] += GM_G1ST_POINTS_REWARD
-                        admin_points["claimed_points"] += GM_G1ST_POINTS_REWARD
+                        admin_points["balance"] -= GM_MV_POINTS_REWARD
+                        admin_points["my_points"] += GM_MV_POINTS_REWARD
+                        admin_points["claimed_points"] += GM_MV_POINTS_REWARD
                         save_data("admin_points_table", admin_points)
 
-                        await log_points_transaction(user_id, GM_G1ST_POINTS_REWARD, "GM points")
+                        await log_points_transaction(user_id, GM_MV_POINTS_REWARD, "GM points")
 
                     else:
                         # Award points to a regular user from the main balance
-                        if admin_points["balance"] < GM_G1ST_POINTS_REWARD:
+                        if admin_points["balance"] < GM_MV_POINTS_REWARD:
                             print("⚠️ Admin balance is too low to award points. Skipping.")
                             return
 
                         user_data = user_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
-                        user_data["all_time_points"] += GM_G1ST_POINTS_REWARD
-                        user_data["available_points"] += GM_G1ST_POINTS_REWARD
+                        user_data["all_time_points"] += GM_MV_POINTS_REWARD
+                        user_data["available_points"] += GM_MV_POINTS_REWARD
                         save_data("user_points_table", user_points)
 
-                        admin_points["balance"] -= GM_G1ST_POINTS_REWARD
-                        admin_points["claimed_points"] += GM_G1ST_POINTS_REWARD
+                        admin_points["balance"] -= GM_MV_POINTS_REWARD
+                        admin_points["claimed_points"] += GM_MV_POINTS_REWARD
                         save_data("admin_points_table", admin_points)
 
-                        await log_points_transaction(user_id, GM_G1ST_POINTS_REWARD, "GM points")
+                        await log_points_transaction(user_id, GM_MV_POINTS_REWARD, "GM points")
 
                     # Log that the user received points for today
                     gm_log[user_id] = today
@@ -3430,7 +3421,7 @@ async def on_message(message):
                     # --- Send the premium embed ---
                     embed = discord.Embed(
                         title="🎉 Morning Points Awarded! 🎉",
-                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{GM_G1ST_POINTS_REWARD:.2f} points** for your morning message.",
+                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{GM_MV_POINTS_REWARD:.2f} points** for your morning message.",
                         color=discord.Color.gold()
                     )
                     # This GIF URL is a placeholder. You can replace it with any GIF you want!
