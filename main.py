@@ -97,20 +97,20 @@ def load_data(table_name, default_value):
 def save_data(table_name, data):
     """Saves data to a specified database table."""
     conn = None
+    print(f"DEBUG: Attempting to save data to '{table_name}'...") # Add this line
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Securely create the table using a parameter
         cur.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} (id INTEGER PRIMARY KEY, data JSONB);").format(sql.Identifier(table_name)))
-        # Securely insert/update data using a parameter
         cur.execute(
             sql.SQL("INSERT INTO {} (id, data) VALUES (1, %s) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data;").format(sql.Identifier(table_name)),
             (json.dumps(data),)
         )
         conn.commit()
         cur.close()
+        print(f"DEBUG: Successfully saved data to '{table_name}'.") # Add this line
     except Exception as e:
-        print(f"Error saving data to {table_name}: {e}")
+        print(f"DEBUG: Error saving data to '{table_name}': {e}") # Add this line
     finally:
         if conn:
             conn.close()
@@ -235,8 +235,6 @@ admin_points = load_data("admin_points_table", {
     "my_points": 0.0,
     "fees_earned": 0.0
 })
-    # save_data("admin_points_table", admin_points)
-    # Remember to uncomment save_data("admin_points_table", admin_points) after this initial run
 
 referral_data = load_data("referral_data_table", {})
 pending_referrals = load_data("pending_referrals_table", {})
