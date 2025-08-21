@@ -32,7 +32,7 @@ class TasksCog(commands.Cog):
         logger.info("All background tasks started.")
 
     #  P E R I O D I C A L      L O G S     /       D A T A       S A V I N G
-    @tasks.loop(minutes=5)
+    @tasks.loop(seconds=30)
     async def save_logs_periodically(self):
         await self.bot.wait_until_ready()
         logger.info("Starting periodic data save...")

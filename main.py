@@ -20,8 +20,11 @@ if not TOKEN:
     exit()
 
 # Define the cogs you want to load
+# This list must include all files in your 'cogs' directory
+# that you want to be loaded as extensions.
 INITIAL_EXTENSIONS = [
-    'cogs.admin'
+    'cogs.admin',
+    'cogs.tasks'
 ]
 
 

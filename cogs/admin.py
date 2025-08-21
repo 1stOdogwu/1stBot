@@ -352,14 +352,11 @@ class AdminCommands(commands.Cog):
             "user_id": str(user_id),
             "points": points,
             "purpose": purpose,
-            "timestamp": self.bot.datetime.now(self.bot.UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
         # Access the point history via the bot object
         self.bot.points_history.append(new_entry)
-
-        # Note: We are no longer saving the data here.
-        # The periodic save_logs_periodically task handles all data saving for efficiency.
 
         # Send a separate log to the burn channel for burn transactions
         if "(burn)" in purpose:
