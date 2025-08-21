@@ -205,23 +205,3 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-
-# Ignore bot's data files
-active_tickets.json
-admin_points.json
-approved_proofs.json
-command_logs.json
-giveaway_all_time.json
-giveaway_winners.json
-gm_log.json
-pending_referrals.json
-points.json
-points_history.json
-processed_reactions.json
-quest_submissions.json
-referrals.json
-submissions.json
-vip_posts.json
-weekly_quests.json
-xp.json
-mysterybox_uses.json
