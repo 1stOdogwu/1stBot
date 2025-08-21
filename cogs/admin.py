@@ -49,9 +49,9 @@ class AdminCommands(commands.Cog):
 
             # Retrieve all point values with a default of 0.0
             balance = admin_data.get("balance", 0.0)
-            in_circulation = admin_data.get("claimed_points", 0.0)
-            burned_points = admin_data.get("burned_points", 0.0)
-            treasury = admin_data.get("fees_earned", 0.0)
+            in_circulation = admin_data.get("in_circulation", 0.0)
+            burned = admin_data.get("burned", 0.0)
+            treasury = admin_data.get("treasury", 0.0)
             my_points = admin_data.get("my_points", 0.0)
             total_supply = admin_data.get("total_supply", 0.0)
 
@@ -59,7 +59,7 @@ class AdminCommands(commands.Cog):
             usd_total_supply = total_supply * self.bot.POINTS_TO_USD
             usd_balance = balance * self.bot.POINTS_TO_USD
             usd_in_circulation = in_circulation * self.bot.POINTS_TO_USD
-            usd_burned_points = burned_points * self.bot.POINTS_TO_USD
+            usd_burned = burned * self.bot.POINTS_TO_USD
             usd_treasury = treasury * self.bot.POINTS_TO_USD
             usd_my_points = my_points * self.bot.POINTS_TO_USD
 
@@ -78,7 +78,7 @@ class AdminCommands(commands.Cog):
             embed.add_field(name="In Circulation",
                             value=f"**{in_circulation:,.2f}** points\n(${usd_in_circulation:,.2f})",
                             inline=True)
-            embed.add_field(name="Burned", value=f"**{burned_points:,.2f}** points\n(${usd_burned_points:,.2f})",
+            embed.add_field(name="Burned", value=f"**{burned:,.2f}** points\n(${usd_burned:,.2f})",
                             inline=True)
             embed.add_field(name="Treasury", value=f"**{treasury:,.2f}** points\n(${usd_treasury:,.2f})", inline=True)
             embed.add_field(name="Admin's Earned Points", value=f"**{my_points:,.2f}** points\n(${usd_my_points:,.2f})",
@@ -651,7 +651,7 @@ class AdminCommands(commands.Cog):
 
                         # Deduct points from the admin balance in memory
                         self.bot.admin_points["balance"] -= total_points_to_award
-                        self.bot.admin_points["claimed_points"] += total_points_to_award
+                        self.bot.admin_points["in_circulation"] += total_points_to_award
 
                         # Log the transactions using the refactored helper function
                         if new_member_points > 0:
@@ -961,7 +961,7 @@ class AdminCommands(commands.Cog):
             self.bot.user_points[user_id]["available_points"] += points_to_award
 
             self.bot.admin_points["balance"] -= points_to_award
-            self.bot.admin_points["claimed_points"] += points_to_award
+            self.bot.admin_points["in_circulation"] += points_to_award
 
             for url in submission.get("normalized_proof_urls", []):
                 if url not in self.bot.approved_proofs:
@@ -1015,10 +1015,10 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.MOD_TASK_REVIEW_CHANNEL_ID:
+        if ctx.channel.id != self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID:
             error_embed = discord.Embed(
                 title="❌ Incorrect Channel",
-                description=f"This command can only be used in the <#{self.bot.MOD_TASK_REVIEW_CHANNEL_ID}> channel.",
+                description=f"This command can only be used in the <#{self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID}> channel.",
                 color=discord.Color.red()
             )
             await ctx.send(embed=error_embed, delete_after=15)
@@ -1186,7 +1186,7 @@ class AdminCommands(commands.Cog):
             winners_list.append(member.mention)
 
         self.bot.admin_points["balance"] -= total_points
-        self.bot.admin_points["claimed_points"] += total_points
+        self.bot.admin_points["in_circulation"] += total_points
 
         # 4. Send confirmation embed
         embed = discord.Embed(title="🎉 Points Awarded!", description=f"The following user(s) have been awarded points:",
@@ -1276,7 +1276,7 @@ class AdminCommands(commands.Cog):
             winners_list.append(f"{member.mention} ({points:.2f})")
 
         self.bot.admin_points["balance"] -= total_points
-        self.bot.admin_points["claimed_points"] += total_points
+        self.bot.admin_points["in_circulation"] += total_points
 
         # We removed all the save_data() and update_giveaway_winners_history() calls here.
         # The periodic save_logs_periodically task handles this.
@@ -1605,8 +1605,9 @@ class AdminCommands(commands.Cog):
         # 2. Process the transaction in memory
         fee = pending_payout["fee"]
         self.bot.admin_points["balance"] -= requested_amount
-        self.bot.admin_points["burned_points"] = self.bot.admin_points.get("burned_points", 0) + requested_amount
-        self.bot.admin_points["fees_earned"] = self.bot.admin_points.get("fees_earned", 0) + fee
+        self.bot.admin_points["in_circulation"] -= requested_amount
+        self.bot.admin_points["burned"] = self.bot.admin_points.get("burned", 0) + requested_amount
+        self.bot.admin_points["treasury"] = self.bot.admin_points.get("treasury", 0) + fee
 
         del user_data["pending_payout"]
         self.bot.user_points[user_id] = user_data
@@ -1891,7 +1892,7 @@ class AdminCommands(commands.Cog):
             quest_data[str(quest_number)]["status"] = "approved"
 
             self.bot.admin_points["balance"] -= points_to_award
-            self.bot.admin_points["claimed_points"] += points_to_award
+            self.bot.admin_points["in_circulation"] += points_to_award
 
             if "normalized_tweet" in quest_data[str(quest_number)]:
                 normalized_url = quest_data[str(quest_number)]["normalized_tweet"]
@@ -1986,7 +1987,7 @@ class AdminCommands(commands.Cog):
 
         # Deduct points from the admin balance
         self.bot.admin_points["balance"] -= points_to_add
-        self.bot.admin_points["claimed_points"] = self.bot.admin_points.get("claimed_points", 0.0) + points_to_add
+        self.bot.admin_points["in_circulation"] = self.bot.admin_points.get("in_circulation", 0.0) + points_to_add
 
         # Log the transaction in memory
         await self._log_points_transaction(user_id, points_to_add, f"Reaction award from {user.name}")
@@ -2109,7 +2110,7 @@ class AdminCommands(commands.Cog):
             delta = reward - self.bot.MYSTERYBOX_COST
             if self.bot.admin_can_issue(delta):
                 self.bot.admin_points["balance"] -= delta
-                self.bot.admin_points["claimed_points"] += delta
+                self.bot.admin_points["in_circulation"] += delta
             else:
                 self.bot.user_points[user_id]["available_points"] -= delta
                 self.bot.user_points[user_id]["all_time_points"] -= delta
@@ -2117,9 +2118,9 @@ class AdminCommands(commands.Cog):
                 reward = self.bot.MYSTERYBOX_COST
         elif reward < self.bot.MYSTERYBOX_COST:
             burn = self.bot.MYSTERYBOX_COST - reward
-            self.bot.admin_points["burned_points"] = self.bot.admin_points.get("burned_points", 0) + burn
+            self.bot.admin_points["burned"] = self.bot.admin_points.get("burned", 0) + burn
             # The claimed points decrease as a result of a user-initiated burn
-            self.bot.admin_points["claimed_points"] -= burn
+            self.bot.admin_points["in_circulation"] -= burn
 
         # The save_data calls were all removed. The periodic task handles this.
         self.bot.mb_add_use(user_id)
@@ -2207,63 +2208,112 @@ class AdminCommands(commands.Cog):
         if message.author.bot:
             return
 
-        # Process only GM/MV points in the designated channel
-        if message.channel.id == self.bot.GM_MV_CHANNEL_ID:
-            content = message.content.lower()
+        # --- 1. Ticket System Logic (if applicable) ---
+        if message.channel.id == self.bot.SUPPORT_CHANNEL_ID:
+            # ALL the on_ticket_message logic goes here
+            user_id = message.author.id
+            if user_id in self.bot.active_tickets.values():
+                await message.delete()
+                embed = discord.Embed(
+                    title="❌ Active Ticket Found",
+                    description="You already have an active ticket. Please close it before opening a new one.",
+                    color=discord.Color.red()
+                )
+                await message.channel.send(embed=embed, delete_after=10)
+                logger.info(f"Blocked new ticket from {message.author.name}. Active ticket already exists.")
+                return
 
-            if "gm" in content or "mv" in content:
-                user_id = str(message.author.id)
-                today = str(datetime.now(UTC).date())
+            # ... rest of the ticket creation logic ...
 
-                if self.bot.gm_log.get(user_id) != today:
-                    is_author_admin = any(role.id == self.bot.ADMIN_ROLE_ID for role in message.author.roles)
-
-                    if is_author_admin:
-                        self.bot.admin_points["balance"] -= self.bot.GM_MV_POINTS_REWARD
-                        self.bot.admin_points["my_points"] += self.bot.GM_MV_POINTS_REWARD
-                        self.bot.admin_points["claimed_points"] += self.bot.GM_MV_POINTS_REWARD
-                        await self._log_points_transaction(user_id, self.bot.GM_MV_POINTS_REWARD, "GM points")
-                    else:
-                        if self.bot.admin_points["balance"] < self.bot.GM_MV_POINTS_REWARD:
-                            logger.warning("⚠️ Admin balance is too low to award GM points. Skipping.")
-                            return
-
-                        user_data = self.bot.user_points.setdefault(user_id, {"all_time_points": 0.0,
-                                                                              "available_points": 0.0})
-                        user_data["all_time_points"] += self.bot.GM_MV_POINTS_REWARD
-                        user_data["available_points"] += self.bot.GM_MV_POINTS_REWARD
-
-                        self.bot.admin_points["balance"] -= self.bot.GM_MV_POINTS_REWARD
-                        self.bot.admin_points["claimed_points"] += self.bot.GM_MV_POINTS_REWARD
-
-                        await self._log_points_transaction(user_id, self.bot.GM_MV_POINTS_REWARD, "GM points")
-
-                    self.bot.gm_log[user_id] = today
-
-                    # We removed all save_data() calls. The periodic task handles this.
-
-                    embed = discord.Embed(
-                        title="🎉 Morning Points Awarded! 🎉",
-                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{self.bot.GM_MV_POINTS_REWARD:.2f} points** for your morning message.",
-                        color=discord.Color.gold()
-                    )
-                    embed.set_image(url="https://media.tenor.com/Fw5m_qY3S2gAAAAC/puffed-celebration.gif")
-                    embed.set_footer(
-                        text=f"Your new balance is {self.bot.user_points.get(user_id, {}).get('available_points', 0):.2f} points" if not is_admin else "Points have been added to your admin balance.")
-                    embed.timestamp = datetime.now(UTC)
-                    await message.channel.send(embed=embed, delete_after=10)
-
-    @commands.Cog.listener()
-    async def on_message_xp_and_moderation(self, message):
-        if message.author.bot:
+            # We don't need to process commands in this channel, so we return
+            await self.bot.process_commands(message)
             return
 
-        # XP Gaining
+        # --- 2. VIP Post Logic ---
+        if message.channel.id == self.bot.ENGAGEMENT_CHANNEL_ID:
+            # ALL the on_vip_post logic goes here
+            member = message.author
+            is_mod_or_admin = any(role.id in [self.bot.ADMIN_ROLE_ID, self.bot.MOD_ROLE_ID] for role in member.roles)
+
+            if is_mod_or_admin:
+                await self.bot.process_commands(message)
+                return
+
+            user_id = str(member.id)
+            self.bot.vip_posts.setdefault(user_id, {"count": 0, "last_date": ""})
+
+            today = str(datetime.now(UTC).date())
+            if self.bot.vip_posts[user_id]["last_date"] != today:
+                self.bot.vip_posts[user_id]["count"] = 0
+                self.bot.vip_posts[user_id]["last_date"] = today
+
+            if self.bot.VIP_ROLE_ID not in [role.id for role in member.roles]:
+                await message.delete()
+                await message.channel.send(f"❌ {member.mention}, only **VIP members** can post in this channel!",
+                                           delete_after=10)
+                logger.info(f"Deleted message from non-VIP user {member.name} in engagement channel.")
+                return
+
+            self.bot.vip_posts[user_id]["count"] += 1
+
+            if self.bot.vip_posts[user_id]["count"] > 3:
+                await message.delete()
+                await message.channel.send(
+                    f"🚫 {member.mention}, you've reached your daily post limit in this channel (3 per day).",
+                    delete_after=10)
+                logger.info(f"Deleted message from {member.name} for exceeding VIP daily limit.")
+                return
+
+            await self.bot.process_commands(message)
+            return
+
+        # --- 3. Payment Message Logic ---
+        if message.channel.id == self.bot.PAYMENT_CHANNEL_ID:
+            # ALL the on_payment_message logic goes here
+            mod_channel = self.bot.get_channel(self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID)
+            if not mod_channel:
+                logger.error(f"Payment review channel (ID: {self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID}) not found.")
+                await self.bot.process_commands(message)
+                return
+
+            await message.delete()
+
+            files = [await a.to_file() for a in message.attachments] if message.attachments else []
+
+            mod_embed = discord.Embed(
+                title="💰 Payment Confirmation",
+                description=f"Payment proof received from {message.author.mention}.",
+                color=discord.Color.gold()
+            )
+            mod_embed.add_field(name="User ID", value=message.author.id, inline=True)
+            mod_embed.add_field(name="Username", value=message.author.name, inline=True)
+            mod_embed.add_field(name="Message", value=message.content, inline=False)
+            mod_embed.set_thumbnail(
+                url=message.author.avatar.url if message.author.avatar else message.author.default_avatar.url)
+            mod_embed.timestamp = datetime.now(UTC)
+
+            await mod_channel.send(embed=mod_embed, files=files)
+            logger.info(f"Payment proof forwarded from {message.author.name} to mod review channel.")
+
+            user_embed = discord.Embed(
+                title="✅ Payment Proof Received!",
+                description=f"{message.author.mention}, your payment proof has been received and is under review.",
+                color=discord.Color.green()
+            )
+            user_embed.set_footer(text="Thank you for your patience.")
+            user_embed.timestamp = datetime.now(UTC)
+            await message.channel.send(embed=user_embed, delete_after=15)
+            logger.info("Deleted user payment message and sent confirmation.")
+
+            await self.bot.process_commands(message)
+            return
+
+        # --- 4. XP and Moderation Logic (applies to ALL messages) ---
+        # This logic should be placed at the end if it's meant to run for all messages.
         user_id = str(message.author.id)
         self.bot.user_xp.setdefault(user_id, {"xp": 0})
         xp_earned = random.randint(5, 15)
         self.bot.user_xp[user_id]["xp"] += xp_earned
-        # We removed save_xp(), periodic task handles it.
 
         # Banned Words Check
         cleaned_content = message.content.lower().translate(str.maketrans('', '', string.punctuation))
@@ -2274,136 +2324,9 @@ class AdminCommands(commands.Cog):
             logger.info(f"Deleted message from {message.author.name} containing a banned word.")
             return
 
-    @commands.Cog.listener()
-    async def on_vip_post(self, message):
-        if message.author.bot or message.channel.id != self.bot.ENGAGEMENT_CHANNEL_ID:
-            return
-
-        member = message.author
-        is_mod_or_admin = any(role.id in [self.bot.ADMIN_ROLE_ID, self.bot.MOD_ROLE_ID] for role in member.roles)
-
-        if is_mod_or_admin:
-            return
-
-        user_id = str(member.id)
-        self.bot.vip_posts.setdefault(user_id, {"count": 0, "last_date": ""})
-
-        today = str(datetime.now(UTC).date())
-        if self.bot.vip_posts[user_id]["last_date"] != today:
-            self.bot.vip_posts[user_id]["count"] = 0
-            self.bot.vip_posts[user_id]["last_date"] = today
-
-        if self.bot.VIP_ROLE_ID not in [role.id for role in member.roles]:
-            await message.delete()
-            await message.channel.send(f"❌ {member.mention}, only **VIP members** can post in this channel!",
-                                       delete_after=10)
-            logger.info(f"Deleted message from non-VIP user {member.name} in engagement channel.")
-            return
-
-        self.bot.vip_posts[user_id]["count"] += 1
-
-        if self.bot.vip_posts[user_id]["count"] > 3:
-            await message.delete()
-            await message.channel.send(
-                f"🚫 {member.mention}, you've reached your daily post limit in this channel (3 per day).",
-                delete_after=10)
-            logger.info(f"Deleted message from {member.name} for exceeding VIP daily limit.")
-            return
-
-    @commands.Cog.listener()
-    async def on_payment_message(self, message):
-        if message.author.bot or message.channel.id != self.bot.PAYMENT_CHANNEL_ID:
-            return
-
-        mod_channel = self.bot.get_channel(self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID)
-        if not mod_channel:
-            logger.error(f"Payment review channel (ID: {self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID}) not found.")
-            return
-
-        await message.delete()
-
-        files = []
-        if message.attachments:
-            files = [await a.to_file() for a in message.attachments]
-
-        mod_embed = discord.Embed(
-            title="💰 Payment Confirmation",
-            description=f"Payment proof received from {message.author.mention}.",
-            color=discord.Color.gold()
-        )
-        mod_embed.add_field(name="User ID", value=message.author.id, inline=True)
-        mod_embed.add_field(name="Username", value=message.author.name, inline=True)
-        mod_embed.add_field(name="Message", value=message.content, inline=False)
-        mod_embed.set_thumbnail(
-            url=message.author.avatar.url if message.author.avatar else message.author.default_avatar.url)
-        mod_embed.timestamp = datetime.now(UTC)
-
-        await mod_channel.send(embed=mod_embed, files=files)
-        logger.info(f"Payment proof forwarded from {message.author.name} to mod review channel.")
-
-        user_embed = discord.Embed(
-            title="✅ Payment Proof Received!",
-            description=f"{message.author.mention}, your payment proof has been received and is under review.",
-            color=discord.Color.green()
-        )
-        user_embed.set_footer(text="Thank you for your patience.")
-        user_embed.timestamp = datetime.now(UTC)
-        await message.channel.send(embed=user_embed, delete_after=15)
-        logger.info("Deleted user payment message and sent confirmation.")
-
-    @commands.Cog.listener()
-    async def on_ticket_message(self, message):
-        if message.author.bot or message.channel.id != self.bot.SUPPORT_CHANNEL_ID:
-            return
-
-        user_id = message.author.id
-        if user_id in self.bot.active_tickets.values():
-            await message.delete()
-            embed = discord.Embed(
-                title="❌ Active Ticket Found",
-                description="You already have an active ticket. Please close it before opening a new one.",
-                color=discord.Color.red()
-            )
-            await message.channel.send(embed=embed, delete_after=10)
-            logger.info(f"Blocked new ticket from {message.author.name}. Active ticket already exists.")
-            return
-
-        guild = message.guild
-        user = message.author
-        ticket_name = f"ticket-{user.name.lower()}"
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            guild.get_role(self.bot.ADMIN_ROLE_ID): discord.PermissionOverwrite(view_channel=True),
-            guild.get_role(self.bot.MOD_ROLE_ID): discord.PermissionOverwrite(view_channel=True),
-            user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
-            guild.get_member(self.bot.user.id): discord.PermissionOverwrite(view_channel=True, send_messages=True)
-        }
-
-        await message.delete()
-
-        ticket_channel = await guild.create_text_channel(
-            ticket_name,
-            category=guild.get_channel(self.bot.TICKETS_CATEGORY_ID),
-            overwrites=overwrites
-        )
-
-        welcome_embed = discord.Embed(
-            title="🎫 New Support Ticket",
-            description=f"Thank you for reaching out, {user.mention}. A support team member will be with you shortly.",
-            color=discord.Color.blue(),
-            timestamp=datetime.now(UTC)
-        )
-        welcome_embed.add_field(name="Original Message", value=f"> {message.content}", inline=False)
-        welcome_embed.set_footer(text="A team member will respond soon.")
-
-        await ticket_channel.send(f"{user.mention}", embed=welcome_embed)
-        await ticket_channel.send(
-            f"Support team, you have a new ticket from {user.mention}! Use `!close` to close this ticket.")
-
-        self.bot.active_tickets[ticket_channel.id] = user.id
-        # We removed save_data(), periodic task handles it.
-        logger.info(f"Created new ticket for {user.name} in channel #{ticket_channel.name}.")
+        # --- Final Step: Process Commands ---
+        # This is only called if no other 'return' statements were executed.
+        await self.bot.process_commands(message)
 
 
 async def setup(bot):

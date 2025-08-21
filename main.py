@@ -56,10 +56,10 @@ class MyBot(commands.Bot):
         self.admin_points = load_data("admin_points_table", {
             "total_supply": 10000000000.0,
             "balance": 10000000000.0,
-            "claimed_points": 0.0,
-            "burned_points": 0.0,
+            "in_circulation": 0.0,
+            "burned": 0.0,
             "my_points": 0.0,
-            "fees_earned": 0.0
+            "treasury": 0.0
         })
         self.referral_data = load_data("referral_data_table", {})
         self.pending_referrals = load_data("pending_referrals_table", {})

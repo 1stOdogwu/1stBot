@@ -31,8 +31,63 @@ class TasksCog(commands.Cog):
             self.update_giveaway_winners_history.start()
         logger.info("All background tasks started.")
 
+    # G M  /  M V
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if message.author.bot:
+            return
+
+        # Process only GM/MV points in the designated channel
+        if message.channel.id == self.bot.GM_MV_CHANNEL_ID:
+            content = message.content.lower().strip()
+
+            # Check if the message is exactly "gm" or "mv"
+            if content == "gm" or content == "mv":
+                user_id = str(message.author.id)
+                today = str(datetime.now(UTC).date())
+
+                if self.bot.gm_log.get(user_id) != today:
+                    # Check if the author is an admin
+                    is_author_admin = any(role.id == self.bot.ADMIN_ROLE_ID for role in message.author.roles)
+
+                    if is_author_admin:
+                        self.bot.admin_points["balance"] -= self.bot.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["my_points"] += self.bot.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["in_circulation"] += self.bot.GM_MV_POINTS_REWARD
+                    else:
+                        if self.bot.admin_points["balance"] < self.bot.GM_MV_POINTS_REWARD:
+                            logger.warning("⚠️ Admin balance is too low to award GM points. Skipping.")
+                            await message.channel.send("⚠️ An error occurred. Please contact an admin.",
+                                                       delete_after=10)
+                            return
+
+                        user_data = self.bot.user_points.setdefault(user_id,
+                                                                    {"all_time_points": 0.0, "available_points": 0.0})
+                        user_data["all_time_points"] += self.bot.GM_MV_POINTS_REWARD
+                        user_data["available_points"] += self.bot.GM_MV_POINTS_REWARD
+
+                        self.bot.admin_points["balance"] -= self.bot.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["in_circulation"] += self.bot.GM_MV_POINTS_REWARD
+
+                    # Common logic for both admins and non-admins
+                    await self.bot.log_points_transaction(user_id, self.bot.GM_MV_POINTS_REWARD, "GM points")
+                    self.bot.gm_log[user_id] = today
+
+                    embed = discord.Embed(
+                        title="🎉 Morning Points Awarded! 🎉",
+                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{self.bot.GM_MV_POINTS_REWARD:.2f} points** for your morning message.",
+                        color=discord.Color.gold()
+                    )
+                    embed.set_image(url="https://media.tenor.com/Fw5m_qY3S2gAAAAC/puffed-celebration.gif")
+                    embed.set_footer(
+                        text=f"Your new balance is {self.bot.user_points.get(user_id, {}).get('available_points', 0):.2f} points" if not is_author_admin else "Points have been added to your admin balance.")
+                    embed.timestamp = datetime.now(UTC)
+                    await message.channel.send(embed=embed, delete_after=10)
+
+    # IMPORTANT: No await self.bot.process_commands(message) here. The channel only supports listeners.
+
     #  P E R I O D I C A L      L O G S     /       D A T A       S A V I N G
-    @tasks.loop(seconds=30)
+    @tasks.loop(seconds=15)
     async def save_logs_periodically(self):
         await self.bot.wait_until_ready()
         logger.info("Starting periodic data save...")
@@ -203,7 +258,7 @@ class TasksCog(commands.Cog):
             await commands_cog.log_points_transaction(user_id, 200.0, "Weekly XP bonus")
 
         self.bot.admin_points["balance"] -= points_to_award
-        self.bot.admin_points["claimed_points"] += points_to_award
+        self.bot.admin_points["in_circulation"] += points_to_award
 
         self.bot.save_data("user_points_table", self.bot.user_points)
         self.bot.save_data("admin_points_table", self.bot.admin_points)
