@@ -54,6 +54,13 @@ class TasksCog(commands.Cog):
                         self.bot.admin_points["balance"] -= self.bot.GM_MV_POINTS_REWARD
                         self.bot.admin_points["my_points"] += self.bot.GM_MV_POINTS_REWARD
                         self.bot.admin_points["in_circulation"] += self.bot.GM_MV_POINTS_REWARD
+
+                        await self.bot.log_points_transaction(
+                            user_id,
+                            points=self.bot.GM_MV_POINTS_REWARD,
+                            purpose="GM Points"
+                        )
+
                     else:
                         if self.bot.admin_points["balance"] < self.bot.GM_MV_POINTS_REWARD:
                             logger.warning("⚠️ Admin balance is too low to award GM points. Skipping.")
@@ -61,8 +68,7 @@ class TasksCog(commands.Cog):
                                                        delete_after=10)
                             return
 
-                        user_data = self.bot.user_points.setdefault(user_id,
-                                                                    {"all_time_points": 0.0, "available_points": 0.0})
+                        user_data = self.bot.user_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
                         user_data["all_time_points"] += self.bot.GM_MV_POINTS_REWARD
                         user_data["available_points"] += self.bot.GM_MV_POINTS_REWARD
 
@@ -74,17 +80,16 @@ class TasksCog(commands.Cog):
                     self.bot.gm_log[user_id] = today
 
                     embed = discord.Embed(
-                        title="🎉 Morning Points Awarded! 🎉",
-                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{self.bot.GM_MV_POINTS_REWARD:.2f} points** for your morning message.",
+                        title="🎉 GM/MV Points Awarded! 🎉",
+                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{self.bot.GM_MV_POINTS_REWARD:.2f} points** for your GM/MV message.",
                         color=discord.Color.gold()
                     )
                     embed.set_image(url="https://media.tenor.com/Fw5m_qY3S2gAAAAC/puffed-celebration.gif")
                     embed.set_footer(
-                        text=f"Your new balance is {self.bot.user_points.get(user_id, {}).get('available_points', 0):.2f} points" if not is_author_admin else "Points have been added to your admin balance.")
+                        text=f"Your new balance is {self.bot.user_points.get(user_id, {}).get('available_points', 0):.2f} points" if not is_author_admin else "Points have been added to your balance.")
                     embed.timestamp = datetime.now(UTC)
-                    await message.channel.send(embed=embed, delete_after=10)
+                    await message.channel.send(embed=embed, delete_after=20)
 
-    # IMPORTANT: No await self.bot.process_commands(message) here. The channel only supports listeners.
 
     #  P E R I O D I C A L      L O G S     /       D A T A       S A V I N G
     @tasks.loop(seconds=15)

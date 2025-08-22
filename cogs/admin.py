@@ -346,36 +346,6 @@ class AdminCommands(commands.Cog):
             embed=history_embed  # Changed 'content' to 'embed'
         )
 
-    async def _log_points_transaction(self, user_id, points, purpose):
-        """Adds a new entry to the points' history log and updates the channel message."""
-        new_entry = {
-            "user_id": str(user_id),
-            "points": points,
-            "purpose": purpose,
-            "timestamp": datetime.now(UTC).isoformat()
-        }
-
-        # Access the point history via the bot object
-        self.bot.points_history.append(new_entry)
-
-        # Send a separate log to the burn channel for burn transactions
-        if "(burn)" in purpose:
-            user = self.bot.get_user(int(user_id))
-            user_name = user.display_name if user else "Unknown User"
-            sign = "+" if points >= 0 else ""
-            log_message = f"💵 {user_name} | {purpose} | **{sign}{points:.2f} MVpts**"
-
-            burns_channel = self.bot.get_channel(self.bot.BURNS_LOG_CHANNEL_ID)
-            if burns_channel:
-                try:
-                    await burns_channel.send(f"🔥 BURN LOG: {log_message}")
-                except discord.Forbidden:
-                    logger.error(
-                        f"Bot missing permissions to log burn transaction to channel ({self.bot.BURNS_LOG_CHANNEL_ID}).")
-
-        # Now, call the helper function to update the history message
-        await self.bot.update_points_history_message()
-
 #  === V E R I F I C A T I O N      M E C H A N I S M ===
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
@@ -2207,27 +2177,78 @@ class AdminCommands(commands.Cog):
     async def on_message(self, message):
         if message.author.bot:
             return
-
         # --- 1. Ticket System Logic (if applicable) ---
         if message.channel.id == self.bot.SUPPORT_CHANNEL_ID:
-            # ALL the on_ticket_message logic goes here
             user_id = message.author.id
             if user_id in self.bot.active_tickets.values():
-                await message.delete()
                 embed = discord.Embed(
                     title="❌ Active Ticket Found",
                     description="You already have an active ticket. Please close it before opening a new one.",
                     color=discord.Color.red()
                 )
-                await message.channel.send(embed=embed, delete_after=10)
+                await message.channel.send(embed=embed, delete_after=20)
                 logger.info(f"Blocked new ticket from {message.author.name}. Active ticket already exists.")
+                await message.delete()
                 return
 
-            # ... rest of the ticket creation logic ...
+            guild = message.guild
+            user = message.author
+            ticket_name = f"ticket-{user.name.lower()}"
 
-            # We don't need to process commands in this channel, so we return
-            await self.bot.process_commands(message)
-            return
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                guild.get_role(self.bot.ADMIN_ROLE_ID): discord.PermissionOverwrite(view_channel=True),
+                guild.get_role(self.bot.MOD_ROLE_ID): discord.PermissionOverwrite(view_channel=True),
+                user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+                guild.get_member(self.bot.user.id): discord.PermissionOverwrite(view_channel=True,
+                                                                                send_messages=True)
+            }
+
+            try:
+                ticket_channel = await guild.create_text_channel(
+                    ticket_name,
+                    category=guild.get_channel(self.bot.TICKETS_CATEGORY_ID),
+                    overwrites=overwrites
+                )
+
+                welcome_embed = discord.Embed(
+                    title="🎫 New Support Ticket",
+                    description=f"Thank you for reaching out, {user.mention}. A support team member will be with you shortly.",
+                    color=discord.Color.blue(),
+                    timestamp=datetime.now(UTC)
+                )
+                welcome_embed.add_field(name="Original Message", value=f"> {message.content}", inline=False)
+                welcome_embed.set_footer(text="A team member will respond soon.")
+
+                await ticket_channel.send(f"{user.mention}", embed=welcome_embed)
+                await ticket_channel.send(
+                    f"Support team, you have a new ticket from {user.mention}! Use `!close` to close this ticket.")
+
+                await message.delete()
+
+                self.bot.active_tickets[ticket_channel.id] = user.id
+                logger.info(f"Created new ticket for {user.name} in channel #{ticket_channel.name}.")
+
+            except discord.Forbidden:
+                logger.error("Bot is missing permissions to create channels or manage roles.")
+                embed = discord.Embed(
+                    title="❌ Permissions Error",
+                    description="An error occurred. I don't have the permissions to create a ticket.",
+                    color=discord.Color.red()
+                )
+                await message.channel.send(embed=embed, delete_after=20)
+            except Exception as e:
+                logger.error(f"❌ An unhandled error occurred in ticket creation: {e}")
+                embed = discord.Embed(
+                    title="❌ An Error Occurred",
+                    description="An unexpected error occurred while creating the ticket.",
+                    color=discord.Color.red()
+                )
+                await message.channel.send(embed=embed, delete_after=20)
+                # We don't need to process commands in this channel, so we return
+                await self.bot.process_commands(message)
+                return
+
 
         # --- 2. VIP Post Logic ---
         if message.channel.id == self.bot.ENGAGEMENT_CHANNEL_ID:
@@ -2260,7 +2281,7 @@ class AdminCommands(commands.Cog):
                 await message.delete()
                 await message.channel.send(
                     f"🚫 {member.mention}, you've reached your daily post limit in this channel (3 per day).",
-                    delete_after=10)
+                    delete_after=20)
                 logger.info(f"Deleted message from {member.name} for exceeding VIP daily limit.")
                 return
 
@@ -2278,8 +2299,9 @@ class AdminCommands(commands.Cog):
 
             await message.delete()
 
-            files = [await a.to_file() for a in message.attachments] if message.attachments else []
-
+        files = [await a.to_file() for a in message.attachments] if message.attachments else []
+        mod_channel = self.bot.get_channel(self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID)
+        if mod_channel:
             mod_embed = discord.Embed(
                 title="💰 Payment Confirmation",
                 description=f"Payment proof received from {message.author.mention}.",
@@ -2302,7 +2324,7 @@ class AdminCommands(commands.Cog):
             )
             user_embed.set_footer(text="Thank you for your patience.")
             user_embed.timestamp = datetime.now(UTC)
-            await message.channel.send(embed=user_embed, delete_after=15)
+            await message.channel.send(embed=user_embed, delete_after=45)
             logger.info("Deleted user payment message and sent confirmation.")
 
             await self.bot.process_commands(message)
@@ -2320,12 +2342,10 @@ class AdminCommands(commands.Cog):
         if any(word in self.bot.banned_words for word in cleaned_content.split()):
             await message.delete()
             await message.channel.send(f'🚫 {message.author.mention}, that message contains a banned word!',
-                                       delete_after=10)
+                                       delete_after=20)
             logger.info(f"Deleted message from {message.author.name} containing a banned word.")
             return
 
-        # --- Final Step: Process Commands ---
-        # This is only called if no other 'return' statements were executed.
         await self.bot.process_commands(message)
 
 

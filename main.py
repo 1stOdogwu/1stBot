@@ -227,6 +227,66 @@ class MyBot(commands.Bot):
             except discord.Forbidden:
                 pass
 
+    async def log_points_transaction(self, user_id, points, purpose):
+        """Adds a new entry to the points' history log and updates the channel message."""
+        try:
+            # Access the user object
+            user = self.get_user(int(user_id))
+            user_mention = user.mention if user else "Unknown User"
+            user_name = user.display_name if user else "Unknown User"
+
+            # 1. Log the transaction to the internal history list
+            new_entry = {
+                "user_id": str(user_id),
+                "points": points,
+                "purpose": purpose,
+                "timestamp": datetime.now(UTC).isoformat()
+            }
+            self.points_history.append(new_entry)
+
+            # 2. Prepare the embed for the public log channel
+            if points > 0:
+                title = "🎉 Points Credited"
+                color = discord.Color.green()
+                sign = "+"
+            else:
+                title = "💔 Points Debited"
+                color = discord.Color.red()
+                sign = ""
+
+            embed = discord.Embed(
+                title=title,
+                description=f"**{user_mention}** received **{sign}{points:.2f} MVpts** for **{purpose}**.",
+                color=color,
+                timestamp=datetime.now(UTC)
+            )
+            embed.set_footer(text=f"Transaction logged for {user_name}")
+
+            points_history_channel = self.get_channel(self.POINTS_HISTORY_CHANNEL_ID)
+            if points_history_channel:
+                await points_history_channel.send(embed=embed)
+            else:
+                logger.error(f"Points history channel (ID: {self.POINTS_HISTORY_CHANNEL_ID}) not found.")
+
+            # 3. Handle the burn log specifically
+            if "(burn)" in purpose.lower():
+                burns_channel = self.get_channel(self.BURNS_LOG_CHANNEL_ID)
+                if burns_channel:
+                    burn_embed = discord.Embed(
+                        title="🔥 Point Burn Log",
+                        description=f"A burn transaction for **{user_mention}** was logged.",
+                        color=discord.Color.dark_red()
+                    )
+                    burn_embed.add_field(name="Amount", value=f"**{sign}{points:.2f} MVpts**", inline=True)
+                    burn_embed.add_field(name="Reason", value=f"**{purpose}**", inline=True)
+                    burn_embed.set_footer(text=f"Logged by {self.user.name}")
+                    await burns_channel.send(embed=burn_embed)
+                else:
+                    logger.error(f"Bot missing permissions or burns channel ({self.BURNS_LOG_CHANNEL_ID}) not found.")
+
+        except Exception as e:
+            logger.error(f"An unexpected error occurred while logging a transaction: {e}", exc_info=True)
+
     async def on_message(self, message):
         """
         Handles command processing.
