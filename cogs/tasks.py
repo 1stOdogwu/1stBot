@@ -131,9 +131,9 @@ class TasksCog(commands.Cog):
             return
 
         try:
-            channel = self.bot.get_channel(self.bot.FIRST_ODOGWU_CHANNEL_ID)
+            channel = self.bot.get_channel(config.FIRST_ODOGWU_CHANNEL_ID)
             if not channel:
-                logger.error(f"❌ Error: Economy updates channel (ID: {self.bot.FIRST_ODOGWU_CHANNEL_ID}) not found.")
+                logger.error(f"❌ Error: Economy updates channel (ID: {config.FIRST_ODOGWU_CHANNEL_ID}) not found.")
                 return
 
             # Get the embed from the AdminCommands cog
@@ -154,7 +154,7 @@ class TasksCog(commands.Cog):
                     logger.info("✅ Old economy message not found. A new one has been sent.")
                 except discord.Forbidden:
                     logger.error(
-                        f"❌ Bot missing permissions to edit message in channel ({self.bot.FIRST_ODOGWU_CHANNEL_ID}).")
+                        f"❌ Bot missing permissions to edit message in channel ({config.FIRST_ODOGWU_CHANNEL_ID}).")
             else:
                 # If there is no existing message ID, send a new message and save its ID
                 message = await channel.send(embed=economy_embed)
@@ -165,7 +165,7 @@ class TasksCog(commands.Cog):
             self.bot.save_data("bot_data_table", self.bot.bot_data)
 
         except discord.Forbidden:
-            logger.error(f"❌ Bot missing permissions to send messages in channel ({self.bot.FIRST_ODOGWU_CHANNEL_ID}).")
+            logger.error(f"❌ Bot missing permissions to send messages in channel ({config.FIRST_ODOGWU_CHANNEL_ID}).")
         except Exception as e:
             logger.error(f"❌ An unexpected error occurred in the economy update task: {e}", exc_info=True)
 
@@ -181,10 +181,10 @@ class TasksCog(commands.Cog):
                 logger.error("❌ AdminCommands cog not found.")
                 return
 
-            channel = self.bot.get_channel(self.bot.PERIODIC_LEADERBOARD_CHANNEL_ID)
+            channel = self.bot.get_channel(config.PERIODIC_LEADERBOARD_CHANNEL_ID)
             if not channel:
                 logger.error(
-                    f"❌ Error: Leaderboard channel not found (ID: {self.bot.PERIODIC_LEADERBOARD_CHANNEL_ID}).")
+                    f"❌ Error: Leaderboard channel not found (ID: {config.PERIODIC_LEADERBOARD_CHANNEL_ID}).")
                 return
 
             # Use the new utility function for each leaderboard

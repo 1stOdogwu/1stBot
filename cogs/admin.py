@@ -290,7 +290,7 @@ class AdminCommands(commands.Cog):
 
         # 3. Implement the list size limit
         if len(self.bot.all_time_giveaway_winners_log) > config.MAX_WINNERS_HISTORY:
-            entries_to_remove = len(self.bot.all_time_giveaway_winners_log) - self.bot.MAX_WINNERS_HISTORY
+            entries_to_remove = len(self.bot.all_time_giveaway_winners_log) - config.MAX_WINNERS_HISTORY
             del self.bot.all_time_giveaway_winners_log[:entries_to_remove]
 
         # 4. Clear the temporary log in the bot's memory
