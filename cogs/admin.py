@@ -2289,8 +2289,8 @@ class AdminCommands(commands.Cog):
                 )
                 await message.channel.send(embed=embed, delete_after=20)
                 # We don't need to process commands in this channel, so we return
-                await self.bot.process_commands(message)
-                return
+
+            return
 
 
         # --- 2. VIP Post Logic ---
@@ -2326,9 +2326,6 @@ class AdminCommands(commands.Cog):
                     f"🚫 {member.mention}, you've reached your daily post limit in this channel (3 per day).",
                     delete_after=20)
                 logger.info(f"Deleted message from {member.name} for exceeding VIP daily limit.")
-                return
-
-            await self.bot.process_commands(message)
             return
 
         # --- 3. Payment Message Logic ---
@@ -2337,40 +2334,38 @@ class AdminCommands(commands.Cog):
             mod_channel = self.bot.get_channel(config.MOD_PAYMENT_REVIEW_CHANNEL_ID)
             if not mod_channel:
                 logger.error(f"Payment review channel (ID: {config.MOD_PAYMENT_REVIEW_CHANNEL_ID}) not found.")
-                await self.bot.process_commands(message)
+                await message.delete()
                 return
 
-            await message.delete()
 
-        files = [await a.to_file() for a in message.attachments] if message.attachments else []
-        mod_channel = self.bot.get_channel(config.MOD_PAYMENT_REVIEW_CHANNEL_ID)
-        if mod_channel:
-            mod_embed = discord.Embed(
-                title="💰 Payment Confirmation",
-                description=f"Payment proof received from {message.author.mention}.",
-                color=discord.Color.gold()
-            )
-            mod_embed.add_field(name="User ID", value=message.author.id, inline=True)
-            mod_embed.add_field(name="Username", value=message.author.name, inline=True)
-            mod_embed.add_field(name="Message", value=message.content, inline=False)
-            mod_embed.set_thumbnail(
-                url=message.author.avatar.url if message.author.avatar else message.author.default_avatar.url)
-            mod_embed.timestamp = datetime.now(UTC)
+            files = [await a.to_file() for a in message.attachments] if message.attachments else []
+            mod_channel = self.bot.get_channel(config.MOD_PAYMENT_REVIEW_CHANNEL_ID)
+            if mod_channel:
+                mod_embed = discord.Embed(
+                    title="💰 Payment Confirmation",
+                    description=f"Payment proof received from {message.author.mention}.",
+                    color=discord.Color.gold()
+                )
+                mod_embed.add_field(name="User ID", value=message.author.id, inline=True)
+                mod_embed.add_field(name="Username", value=message.author.name, inline=True)
+                mod_embed.add_field(name="Message", value=message.content, inline=False)
+                mod_embed.set_thumbnail(
+                    url=message.author.avatar.url if message.author.avatar else message.author.default_avatar.url)
+                mod_embed.timestamp = datetime.now(UTC)
 
-            await mod_channel.send(embed=mod_embed, files=files)
-            logger.info(f"Payment proof forwarded from {message.author.name} to mod review channel.")
+                await mod_channel.send(embed=mod_embed, files=files)
+                logger.info(f"Payment proof forwarded from {message.author.name} to mod review channel.")
 
-            user_embed = discord.Embed(
-                title="✅ Payment Proof Received!",
-                description=f"{message.author.mention}, your payment proof has been received and is under review.",
-                color=discord.Color.green()
-            )
-            user_embed.set_footer(text="Thank you for your patience.")
-            user_embed.timestamp = datetime.now(UTC)
-            await message.channel.send(embed=user_embed, delete_after=45)
-            logger.info("Deleted user payment message and sent confirmation.")
+                user_embed = discord.Embed(
+                    title="✅ Payment Proof Received!",
+                    description=f"{message.author.mention}, your payment proof has been received and is under review.",
+                    color=discord.Color.green()
+                )
+                user_embed.set_footer(text="Thank you for your patience.")
+                user_embed.timestamp = datetime.now(UTC)
+                await message.channel.send(embed=user_embed, delete_after=45)
+                logger.info("Deleted user payment message and sent confirmation.")
 
-            await self.bot.process_commands(message)
             return
 
         # Process only GM/MV points in the designated channel
