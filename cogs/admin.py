@@ -13,22 +13,6 @@ from logger import bot_logger as logger
 from utils import normalize_url
 import config
 
-# Helper function to check for an Admin role
-def is_admin():
-    async def predicate(ctx):
-        admin_role = ctx.guild.get_role(ctx.config.ADMIN_ROLE_ID)
-        return admin_role in ctx.author.roles
-    return commands.check(predicate)
-
-# New helper function to check for Admin OR Mod role
-def is_admin_or_mod():
-    async def predicate(ctx):
-        admin_role = ctx.guild.get_role(ctx.config.ADMIN_ROLE_ID)
-        mod_role = ctx.guild.get_role(ctx.config.MOD_ROLE_ID)
-        # Check if the author has either role
-        return admin_role in ctx.author.roles or mod_role in ctx.author.roles
-    return commands.check(predicate)
-
 
 class AdminCommands(commands.Cog):
     def __init__(self, bot):
@@ -411,9 +395,8 @@ class AdminCommands(commands.Cog):
 
 
     # -------------------------A D M I N       U N I T-----------------------------------
-
-    @is_admin()
     @commands.command(name='admin', help="(Admin Only) Displays the bot's point economy status as a premium embed.")
+    @commands.has_any_role(config.ADMIN_ROLE_ID)
     async def admin(self, ctx):
         """
         (Admin Only) Displays the bot's point economy status as a premium embed.
@@ -423,9 +406,9 @@ class AdminCommands(commands.Cog):
         economy_embed = await self.get_economy_embed()
         await ctx.send(embed=economy_embed)
 
-    @is_admin()
     @commands.command(name="data",
                       help="(Admin Only) Displays all user data sorted by points, including referral count.")
+    @commands.has_any_role(config.ADMIN_ROLE_ID)
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def get_server_data(self, ctx):
         """
@@ -752,7 +735,7 @@ class AdminCommands(commands.Cog):
             )
 
     @commands.command(name="ref", help="Shows the user a list of people they have successfully referred.")
-    @commands.cooldown(1, 60, commands.BucketType.user)
+    @commands.cooldown(2, 60, commands.BucketType.user)
     async def ref_command(self, ctx):
         """Shows the user a list of people they have successfully referred."""
         # Delete the user's command message
@@ -1139,9 +1122,9 @@ class AdminCommands(commands.Cog):
         await ctx.send(embed=embed, delete_after=30)
 
     # === MANUALLY ADD POINTS ===
-    @is_admin()
     @commands.command(name="addpoints",
                       help="(Admin Only) Manually adds a specified number of points to one or more users.")
+    @commands.has_any_role(config.ADMIN_ROLE_ID)
     async def addpoints(self, ctx, members: commands.Greedy[discord.Member], points_to_add: float, *,
                         purpose: str = "Giveaway winner"):
         """(Admin Only) Manually adds a specified number of points to one or more users."""
@@ -1212,9 +1195,10 @@ class AdminCommands(commands.Cog):
         embed.timestamp = datetime.now(UTC)
         await ctx.send(embed=embed)
 
-    @is_admin()
+
     @commands.command(name='addpoints_flex',
                       help="(Admin Only) Manually adds different point amounts to multiple users.")
+    @commands.has_any_role(config.ADMIN_ROLE_ID)
     async def addpoints_flex(self, ctx, *args):
         """(Admin Only) Manually adds different point amounts to multiple users."""
         # Delete the command message immediately
@@ -2028,8 +2012,8 @@ class AdminCommands(commands.Cog):
 
 
     # -----------------------------------S U P P O R T --- S Y S T E M------------------------
-    @is_admin_or_mod()
     @commands.command(name="close", help="(Admin/Mod Only) Archives a ticket and schedules it for deletion.")
+    @commands.has_any_role(config.ADMIN_ROLE_ID, config.MOD_ROLE_ID)
     async def close(self, ctx):
         """(Admin/Mod Only) Archives a ticket and schedules it for deletion."""
         # Delete the command message
@@ -2431,9 +2415,6 @@ class AdminCommands(commands.Cog):
                                        delete_after=20)
             logger.info(f"Deleted message from {message.author.name} containing a banned word.")
             return
-
-        await self.bot.process_commands(message)
-
 
 async def setup(bot):
     await bot.add_cog(AdminCommands(bot))
