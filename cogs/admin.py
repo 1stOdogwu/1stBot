@@ -11,20 +11,20 @@ from datetime import datetime, UTC
 from database import load_data, save_data
 from logger import bot_logger as logger
 from utils import normalize_url
-from utils import manage_periodic_message
+import config
 
 # Helper function to check for an Admin role
 def is_admin():
     async def predicate(ctx):
-        admin_role = ctx.guild.get_role(ctx.bot.ADMIN_ROLE_ID)
+        admin_role = ctx.guild.get_role(ctx.config.ADMIN_ROLE_ID)
         return admin_role in ctx.author.roles
     return commands.check(predicate)
 
 # New helper function to check for Admin OR Mod role
 def is_admin_or_mod():
     async def predicate(ctx):
-        admin_role = ctx.guild.get_role(ctx.bot.ADMIN_ROLE_ID)
-        mod_role = ctx.guild.get_role(ctx.bot.MOD_ROLE_ID)
+        admin_role = ctx.guild.get_role(ctx.config.ADMIN_ROLE_ID)
+        mod_role = ctx.guild.get_role(ctx.config.MOD_ROLE_ID)
         # Check if the author has either role
         return admin_role in ctx.author.roles or mod_role in ctx.author.roles
     return commands.check(predicate)
@@ -56,12 +56,12 @@ class AdminCommands(commands.Cog):
             total_supply = admin_data.get("total_supply", 0.0)
 
             # Calculate USD values using the constant from self.bot
-            usd_total_supply = total_supply * self.bot.POINTS_TO_USD
-            usd_balance = balance * self.bot.POINTS_TO_USD
-            usd_in_circulation = in_circulation * self.bot.POINTS_TO_USD
-            usd_burned = burned * self.bot.POINTS_TO_USD
-            usd_treasury = treasury * self.bot.POINTS_TO_USD
-            usd_my_points = my_points * self.bot.POINTS_TO_USD
+            usd_total_supply = total_supply * config.POINTS_TO_USD
+            usd_balance = balance * config.POINTS_TO_USD
+            usd_in_circulation = in_circulation * config.POINTS_TO_USD
+            usd_burned = burned * config.POINTS_TO_USD
+            usd_treasury = treasury * config.POINTS_TO_USD
+            usd_my_points = my_points * config.POINTS_TO_USD
 
             # Create the embed object
             embed = discord.Embed(
@@ -158,16 +158,16 @@ class AdminCommands(commands.Cog):
         Generates a formatted points leaderboard embed with medal logic.
         """
         # 1. Get the guild once for efficiency
-        guild = self.bot.get_guild(self.bot.SERVER_ID)
+        guild = self.bot.get_guild(config.SERVER_ID)
         if not guild:
-            logger.error(f"❌ Guild with ID {self.bot.SERVER_ID} not found.")
+            logger.error(f"❌ Guild with ID {config.SERVER_ID} not found.")
             return discord.Embed(description="Server not found. Please check configuration.")
 
         # 2. Filter eligible users efficiently
         eligible_users = {}
         for member in guild.members:
             # Check if the member has the admin or mod role
-            if any(role.id in [self.bot.ADMIN_ROLE_ID, self.bot.MOD_ROLE_ID] for role in member.roles):
+            if any(role.id in [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID] for role in member.roles):
                 continue
 
             # Check if the user has points in the database
@@ -219,16 +219,16 @@ class AdminCommands(commands.Cog):
         Generates a premium XP leaderboard embed.
         """
         # 1. Get the guild once for efficiency
-        guild = self.bot.get_guild(self.bot.SERVER_ID)
+        guild = self.bot.get_guild(config.SERVER_ID)
         if not guild:
-            logger.error(f"❌ Guild with ID {self.bot.SERVER_ID} not found.")
+            logger.error(f"❌ Guild with ID {config.SERVER_ID} not found.")
             return discord.Embed(description="Server not found. Please check configuration.")
 
         # 2. Filter eligible users efficiently
         eligible_users = {}
         for member in guild.members:
             # Check if the member has the admin or mod role
-            if any(role.id in [self.bot.ADMIN_ROLE_ID, self.bot.MOD_ROLE_ID] for role in member.roles):
+            if any(role.id in [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID] for role in member.roles):
                 continue
 
             # Check if the user has XP in the database
@@ -289,7 +289,7 @@ class AdminCommands(commands.Cog):
         self.bot.all_time_giveaway_winners_log.extend(temporary_winners)
 
         # 3. Implement the list size limit
-        if len(self.bot.all_time_giveaway_winners_log) > self.bot.MAX_WINNERS_HISTORY:
+        if len(self.bot.all_time_giveaway_winners_log) > config.MAX_WINNERS_HISTORY:
             entries_to_remove = len(self.bot.all_time_giveaway_winners_log) - self.bot.MAX_WINNERS_HISTORY
             del self.bot.all_time_giveaway_winners_log[:entries_to_remove]
 
@@ -307,9 +307,9 @@ class AdminCommands(commands.Cog):
         """Periodically updates the point history message in a dedicated channel."""
 
         # 1. Access the channel ID from the bot object
-        channel = self.bot.get_channel(self.bot.POINTS_HISTORY_CHANNEL_ID)
+        channel = self.bot.get_channel(config.POINTS_HISTORY_CHANNEL_ID)
         if not channel:
-            logger.error(f"❌ Error: Points history channel with ID {self.bot.POINTS_HISTORY_CHANNEL_ID} not found.")
+            logger.error(f"❌ Error: Points history channel with ID {config.POINTS_HISTORY_CHANNEL_ID} not found.")
             return
 
         # 2. Build the history message content efficiently
@@ -338,7 +338,7 @@ class AdminCommands(commands.Cog):
         )
 
         # 3. Use the utility function to manage the message with the new embed
-        await manage_periodic_message(
+        await self.bot.manage_periodic_message(
             bot=self.bot,
             channel=channel,
             bot_data=self.bot.bot_data,
@@ -351,7 +351,7 @@ class AdminCommands(commands.Cog):
     async def on_raw_reaction_add(self, payload):
         """Handles reaction role assignments."""
         # Ignore reactions not in the correct channel or on the correct message
-        if payload.channel_id != self.bot.VERIFY_CHANNEL_ID or payload.message_id != self.bot.VERIFY_MESSAGE_ID:
+        if payload.channel_id != config.VERIFY_CHANNEL_ID or payload.message_id != config.VERIFY_MESSAGE_ID:
             return
 
         guild = self.bot.get_guild(payload.guild_id)
@@ -365,7 +365,7 @@ class AdminCommands(commands.Cog):
         # Correctly handle both custom and default emojis
         emoji_lookup_key = (payload.emoji.name, payload.emoji.id)
 
-        role_id_to_add = self.bot.EMOJI_ROLE_MAP.get(emoji_lookup_key)
+        role_id_to_add = config.EMOJI_ROLE_MAP.get(emoji_lookup_key)
 
         if role_id_to_add:
             role = guild.get_role(role_id_to_add)
@@ -382,7 +382,7 @@ class AdminCommands(commands.Cog):
     async def on_raw_reaction_remove(self, payload):
         """Handles reaction role removals."""
         # Ignore reactions not in the correct channel or on the correct message
-        if payload.channel_id != self.bot.VERIFY_CHANNEL_ID or payload.message_id != self.bot.VERIFY_MESSAGE_ID:
+        if payload.channel_id != config.VERIFY_CHANNEL_ID or payload.message_id != config.VERIFY_MESSAGE_ID:
             return
 
         guild = self.bot.get_guild(payload.guild_id)
@@ -396,7 +396,7 @@ class AdminCommands(commands.Cog):
         if payload.emoji.id is None:
             emoji_lookup_key = (str(payload.emoji), None)
 
-        role_id_to_remove = self.bot.EMOJI_ROLE_MAP.get(emoji_lookup_key)
+        role_id_to_remove = config.EMOJI_ROLE_MAP.get(emoji_lookup_key)
 
         if role_id_to_remove:
             role = guild.get_role(role_id_to_remove)
@@ -516,9 +516,6 @@ class AdminCommands(commands.Cog):
         if referrer and referrer.id != self.bot.user.id:
             self.bot.pending_referrals[str(member.id)] = str(referrer.id)
 
-            # We removed the save_data call here for performance.
-            # The periodic save_logs_periodically task will handle this.
-
             logger.info(f"New pending referral for {member.name}. Referrer: {referrer.name}")
 
             # Send a confirmation to the referrer
@@ -541,141 +538,162 @@ class AdminCommands(commands.Cog):
         Handles member updates, primarily for referral rewards and
         role-based actions.
         """
-        # Get a list of roles that were just added
+        if after.bot:
+            return
+
+        # Check for new roles being added. If none, do nothing.
         new_roles = [r for r in after.roles if r not in before.roles]
         if not new_roles:
-            # Check for role removals, which don't trigger new_roles
-            if len(after.roles) < len(before.roles):
-                # We will handle this in the role stripping logic below
-                pass
-            else:
-                return
+            return
 
         user_id = str(after.id)
-        channel = self.bot.get_channel(self.bot.REFERRAL_CHANNEL_ID)
+        channel = self.bot.get_channel(config.REFERRAL_CHANNEL_ID)
 
-        # === Welcome Message for New Tivated Users ===
-        if self.bot.TIVATED_ROLE_ID in [role.id for role in new_roles]:
+        # --- Welcome Message Logic for Newly 'Tivated' Users ---
+        if config.TIVATED_ROLE_ID in [role.id for role in new_roles]:
             referrer_id = self.bot.pending_referrals.get(user_id)
             if channel and referrer_id:
-                # Use get_user for a fast cache lookup
-                referrer = self.bot.get_user(int(referrer_id))
-                if referrer:
+                try:
+                    # Use fetch_user for a reliable API lookup, in case the user is not in the cache
+                    referrer = await self.bot.fetch_user(int(referrer_id))
                     embed = discord.Embed(
                         title="👋 Welcome to ManaVerse!",
                         description=(
                             f"🎉 {after.mention} just joined the community!\n\n"
                             f"🙌 You were referred by {referrer.mention}.\n\n"
-                            f"💡 **Reminder:** {referrer.mention} will receive their referral reward "
+                            f"💡 **Reminder:** {referrer.mention} and {after.mention} will receive their referral reward "
                             f"once {after.mention} gets a **paid role** in the server.\n\n"
-                            f"👉 To get started, check out <#{self.bot.HOW_TO_JOIN_CHANNEL_ID}>."
+                            f"👉 To get started, check out <#{config.HOW_TO_JOIN_CHANNEL_ID}>."
                         ),
                         color=discord.Color.blue()
                     )
-                    embed.set_thumbnail(url=after.avatar.url if after.avatar else None)
+                    if after.avatar:
+                        embed.set_thumbnail(url=after.avatar.url)
                     embed.set_footer(
                         text="ManaVerse Referral System – Building stronger connections 💎"
                     )
                     embed.timestamp = datetime.now(UTC)
                     await channel.send(embed=embed)
                     logger.info(f"Sent welcome message for referred user {after.name}.")
-                else:
+                except discord.NotFound:
                     await channel.send(f"🎉 Welcome {after.mention}!")
                     logger.warning(f"Referred user {after.name} joined, but referrer was not found.")
             elif channel:
                 await channel.send(f"🎉 Welcome {after.mention}!")
 
-        # === Referral Point Award Logic ===
-        if user_id in self.bot.pending_referrals and user_id not in self.bot.referred_users:
-            referrer_id = self.bot.pending_referrals[user_id]
-            referrer_member = after.guild.get_member(int(referrer_id))
+        # --- CRUCIAL CHECKS BEFORE AWARDING POINTS ---
+        # These checks were in your original code and are necessary.
+        if user_id not in self.bot.pending_referrals:
+            return
 
-            for role in new_roles:
-                if role.id in self.bot.REFERRAL_POINTS_PER_ROLE:
-                    referrer_points = self.bot.REFERRAL_POINTS_PER_ROLE[role.id]
-                    new_member_points = self.bot.NEW_MEMBER_POINTS_PER_ROLE.get(role.id, 0.0)
+        if user_id in self.bot.referred_users:
+            logger.info(f"User {after.name} has already received a referral bonus. Skipping point award.")
+            return
 
-                    if referrer_member and any(role.id == self.bot.ADMIN_ROLE_ID for role in referrer_member.roles):
-                        referrer_points = 0.0
+        # --- REFERRAL POINT AWARD LOGIC ---
+        referrer_id = self.bot.pending_referrals[user_id]
 
-                    total_points_to_award = referrer_points + new_member_points
+        for role in new_roles:
+            if role.id in config.REFERRAL_POINTS_PER_ROLE:
+                referrer_points = config.REFERRAL_POINTS_PER_ROLE[role.id]
+                new_member_points = config.NEW_MEMBER_POINTS_PER_ROLE.get(role.id, 0.0)
 
-                    # --- CRITICAL SAFETY CHECK: Always check balance first ---
-                    if self.bot.admin_points["balance"] < total_points_to_award:
-                        logger.error(f"❌ Not enough points in admin balance to award referral.")
-                        if channel:
-                            await channel.send(
-                                "❌ Referral reward could not be given due to insufficient points. Please notify admin.")
-                        return  # Stop the process if the balance is too low
+                referrer_member = after.guild.get_member(int(referrer_id))
+                if referrer_member and any(role.id == config.ADMIN_ROLE_ID for role in referrer_member.roles):
+                    referrer_points = 0.0
 
-                    # --- BEGIN TRANSACTION ---
-                    try:
-                        # Add points to users in memory
-                        self.bot.user_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
-                        self.bot.user_points[user_id]["all_time_points"] += new_member_points
-                        self.bot.user_points[user_id]["available_points"] += new_member_points
+                total_points_to_award = referrer_points + new_member_points
 
-                        self.bot.user_points.setdefault(referrer_id, {"all_time_points": 0.0, "available_points": 0.0})
-                        self.bot.user_points[referrer_id]["all_time_points"] += referrer_points
-                        self.bot.user_points[referrer_id]["available_points"] += referrer_points
+                # --- CRITICAL SAFETY CHECK: Always check balance first ---
+                if self.bot.admin_points["balance"] < total_points_to_award:
+                    logger.error(f"❌ Not enough points in admin balance to award referral.")
+                    if channel:
+                        await channel.send(
+                            "❌ Referral reward could not be given due to insufficient points. Please notify admin.")
+                    return
 
-                        # Deduct points from the admin balance in memory
-                        self.bot.admin_points["balance"] -= total_points_to_award
-                        self.bot.admin_points["in_circulation"] += total_points_to_award
+                # --- BEGIN TRANSACTION ---
+                try:
+                    # Add points to users in memory
+                    self.bot.user_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
+                    self.bot.user_points[user_id]["all_time_points"] += new_member_points
+                    self.bot.user_points[user_id]["available_points"] += new_member_points
 
-                        # Log the transactions using the refactored helper function
-                        if new_member_points > 0:
-                            await self._log_points_transaction(user_id, new_member_points,
+                    self.bot.user_points.setdefault(referrer_id, {"all_time_points": 0.0, "available_points": 0.0})
+                    self.bot.user_points[referrer_id]["all_time_points"] += referrer_points
+                    self.bot.user_points[referrer_id]["available_points"] += referrer_points
+
+                    # Deduct points from the admin balance in memory
+                    self.bot.admin_points["balance"] -= total_points_to_award
+                    self.bot.admin_points["in_circulation"] += total_points_to_award
+
+                    # Log the transactions using the refactored helper function
+                    if new_member_points > 0:
+                        await self.bot.log_points_transaction(user_id, new_member_points,
                                                                f"Joined via referral by {referrer_member.display_name}")
-                        if referrer_points > 0:
-                            await self._log_points_transaction(referrer_id, referrer_points,
+                    if referrer_points > 0:
+                        await self.bot.log_points_transaction(referrer_id, referrer_points,
                                                                f"Successful referral of {after.display_name}")
 
-                        # Update referral data in memory
-                        self.bot.referral_data[user_id] = referrer_id
-                        del self.bot.pending_referrals[user_id]
-                        self.bot.referred_users.add(user_id)
+                    # Update referral data in memory
+                    self.bot.referral_data[user_id] = referrer_id
 
-                        logger.info(f"Successful referral awarded to {referrer_member.display_name}.")
+                    # We need to save the data immediately to prevent data loss on critical transactions.
+                    self.bot.save_data("referred_users_table", list(self.bot.referred_users))
+                    self.bot.save_data("referral_data_table", self.bot.referral_data)
+                    self.bot.save_data("pending_referrals_table", self.bot.pending_referrals)
+                    self.bot.save_data("admin_points_table", self.bot.admin_points)
+                    self.bot.save_data("user_points_table", self.bot.user_points)
 
-                        if channel:
-                            embed = discord.Embed(
-                                title="🎉 Successful Referral!",
-                                description=(
-                                    f"🔥 {referrer_member.mention} just referred {after.mention}!\n\n"
-                                    f"💰 **Rewards Distributed:**\n"
-                                    f"• {referrer_member.mention} earned **{referrer_points:.2f} points** 🪙\n"
-                                    f"• {after.mention} earned **{new_member_points:.2f} points** 🎁"
-                                ),
-                                color=discord.Color.green()
-                            )
-                            embed.set_thumbnail(url=after.avatar.url if after.avatar else None)
-                            embed.set_footer(
-                                text="ManaVerse Referral System – Keep growing the community 🚀"
-                            )
-                            embed.timestamp = datetime.now(UTC)
+                    # Now that data is saved, we can safely delete it from pending
+                    del self.bot.pending_referrals[user_id]
+                    self.bot.referred_users.add(user_id)
 
-                            await channel.send(embed=embed)
+                    logger.info(f"Successful referral awarded to {referrer_member.display_name}.")
 
-                        # Break the loop once the reward is given to avoid duplicate rewards
-                        break
+                    # Send the final successful referral embed
+                    if channel:
+                        embed = discord.Embed(
+                            title="🎉 Successful Referral!",
+                            description=(
+                                f"🔥 {referrer_member.mention} just referred {after.mention}!\n\n"
+                                f"💰 **Rewards Distributed:**\n"
+                                f"• {referrer_member.mention} earned **{referrer_points:.2f} points** 🪙\n"
+                                f"• {after.mention} earned **{new_member_points:.2f} points** 🎁"
+                            ),
+                            color=discord.Color.green()
+                        )
+                        if after.avatar:
+                            embed.set_thumbnail(url=after.avatar.url)
+                        embed.set_footer(
+                            text="ManaVerse Referral System – Keep growing the community 🚀"
+                        )
+                        embed.timestamp = datetime.now(UTC)
+                        await channel.send(embed=embed)
 
-                    except Exception as e:
-                        # If an error occurs, log it and revert the transaction to be safe
-                        logger.error(f"❌ An error occurred during point transaction: {e}")
+                    # Break the loop once the reward is given to avoid duplicate rewards
+                    break
 
-                        # Revert points for safety
-                        if user_id in self.bot.user_points:
-                            self.bot.user_points[user_id]["all_time_points"] -= new_member_points
-                            self.bot.user_points[user_id]["available_points"] -= new_member_points
-                        if referrer_id in self.bot.user_points:
-                            self.bot.user_points[referrer_id]["all_time_points"] -= referrer_points
-                            self.bot.user_points[referrer_id]["available_points"] -= referrer_points
+                except Exception as e:
+                    # If an error occurs, log it and revert the transaction
+                    logger.error(f"❌ An error occurred during point transaction: {e}", exc_info=True)
 
-                        if channel:
-                            await channel.send(
-                                f"❌ An error occurred during point transaction. Please contact an admin.")
-                        return  # Stop the process if the transaction fails
+                    # Revert points for safety
+                    if user_id in self.bot.user_points:
+                        self.bot.user_points[user_id]["all_time_points"] -= new_member_points
+                        self.bot.user_points[user_id]["available_points"] -= new_member_points
+                    if referrer_id in self.bot.user_points:
+                        self.bot.user_points[referrer_id]["all_time_points"] -= referrer_points
+                        self.bot.user_points[referrer_id]["available_points"] -= referrer_points
+
+                    # Also revert the admin balance for safety
+                    self.bot.admin_points["balance"] += total_points_to_award
+                    self.bot.admin_points["in_circulation"] -= total_points_to_award
+
+                    if channel:
+                        await channel.send(
+                            f"❌ An error occurred during point transaction. Please contact an admin.")
+                    return
 
         # === Role Stripping Logic ===
         if before.roles == after.roles:
@@ -684,7 +702,7 @@ class AdminCommands(commands.Cog):
         if after.bot:
             return
 
-        verified_role = after.guild.get_role(self.bot.TIVATED_ROLE_ID)
+        verified_role = after.guild.get_role(config.TIVATED_ROLE_ID)
 
         if verified_role in before.roles and verified_role not in after.roles:
             try:
@@ -704,9 +722,9 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check if the command is in the correct channel
-        if ctx.channel.id != self.bot.REFERRAL_CHANNEL_ID:
+        if ctx.channel.id != config.REFERRAL_CHANNEL_ID:
             await ctx.send(
-                f"❌ The `!invite` command can only be used in the <#{self.bot.REFERRAL_CHANNEL_ID}> channel.",
+                f"❌ The `!invite` command can only be used in the <#{config.REFERRAL_CHANNEL_ID}> channel.",
                 delete_after=10)
             return
 
@@ -741,8 +759,8 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check if the command is in the correct channel
-        if ctx.channel.id != self.bot.REFERRAL_CHANNEL_ID:
-            await ctx.send(f"❌ This command can only be used in the <#{self.bot.REFERRAL_CHANNEL_ID}> channel.",
+        if ctx.channel.id != config.REFERRAL_CHANNEL_ID:
+            await ctx.send(f"❌ This command can only be used in the <#{config.REFERRAL_CHANNEL_ID}> channel.",
                            delete_after=10)
             return
 
@@ -786,10 +804,10 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.TASK_SUBMIT_CHANNEL_ID:
+        if ctx.channel.id != config.TASK_SUBMIT_CHANNEL_ID:
             error_embed = discord.Embed(
                 title="❌ Incorrect Channel",
-                description=f"This command can only be used in the <#{self.bot.TASK_SUBMIT_CHANNEL_ID}> channel.",
+                description=f"This command can only be used in the <#{config.TASK_SUBMIT_CHANNEL_ID}> channel.",
                 color=discord.Color.red()
             )
             await ctx.send(embed=error_embed, delete_after=15)
@@ -816,7 +834,7 @@ class AdminCommands(commands.Cog):
             return
 
         # 3. Validate Engagements
-        valid_engagements = [e.lower() for e in engagements if e.lower() in self.bot.POINT_VALUES]
+        valid_engagements = [e.lower() for e in engagements if e.lower() in config.POINT_VALUES]
         if not valid_engagements:
             embed = discord.Embed(title="🚫 Submission Failed",
                                   description=f"{ctx.author.mention}, please specify valid engagement types: `like`, `comment`, `retweet`.",
@@ -833,8 +851,8 @@ class AdminCommands(commands.Cog):
             return
 
         # 5. Calculate Points and Store Submission
-        base_points = sum(self.bot.POINT_VALUES[e] for e in valid_engagements)
-        multiplier = max((self.bot.ROLE_MULTIPLIERS.get(role.id, 1.0) for role in ctx.author.roles), default=1.0)
+        base_points = sum(config.POINT_VALUES[e] for e in valid_engagements)
+        multiplier = max((config.ROLE_MULTIPLIERS.get(role.id, 1.0) for role in ctx.author.roles), default=1.0)
         final_points = round(base_points * multiplier, 2)
 
         self.bot.submissions[user_id] = {
@@ -853,7 +871,7 @@ class AdminCommands(commands.Cog):
         # We removed the save_data call here for performance. The periodic task handles this.
 
         # 6. Notify Moderators
-        mod_channel = self.bot.get_channel(self.bot.MOD_TASK_REVIEW_CHANNEL_ID)
+        mod_channel = self.bot.get_channel(config.MOD_TASK_REVIEW_CHANNEL_ID)
         if mod_channel:
             mod_notification_embed = discord.Embed(title="🔍 New Submission for Review",
                                                    description=f"User: {ctx.author.mention}\nAccount: {ctx.author.name}",
@@ -887,10 +905,10 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.MOD_TASK_REVIEW_CHANNEL_ID:
+        if ctx.channel.id != config.MOD_TASK_REVIEW_CHANNEL_ID:
             error_embed = discord.Embed(
                 title="❌ Incorrect Channel",
-                description=f"This command can only be used in the <#{self.bot.MOD_TASK_REVIEW_CHANNEL_ID}> channel.",
+                description=f"This command can only be used in the <#{config.MOD_TASK_REVIEW_CHANNEL_ID}> channel.",
                 color=discord.Color.red()
             )
             await ctx.send(embed=error_embed, delete_after=15)
@@ -908,7 +926,7 @@ class AdminCommands(commands.Cog):
             return
 
         submission = self.bot.submissions[user_id]
-        reply_channel = self.bot.get_channel(submission.get("channel_id", self.bot.TASK_SUBMIT_CHANNEL_ID))
+        reply_channel = self.bot.get_channel(submission.get("channel_id", config.TASK_SUBMIT_CHANNEL_ID))
 
         if not reply_channel:
             logger.warning(f"Could not find reply channel for user {user_id}. Falling back to command channel.")
@@ -938,7 +956,7 @@ class AdminCommands(commands.Cog):
                     self.bot.approved_proofs.append(url)
 
             # 5. Log the transaction and clear the submission
-            await self._log_points_transaction(user_id, points_to_award, "Task submission approved")
+            await self.bot.log_points_transaction(user_id, points_to_award, "Task submission approved")
             del self.bot.submissions[user_id]
 
             user_embed = discord.Embed(title="✅ Submission Approved!",
@@ -985,10 +1003,10 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID:
+        if ctx.channel.id != config.MOD_PAYMENT_REVIEW_CHANNEL_ID:
             error_embed = discord.Embed(
                 title="❌ Incorrect Channel",
-                description=f"This command can only be used in the <#{self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID}> channel.",
+                description=f"This command can only be used in the <#{config.MOD_PAYMENT_REVIEW_CHANNEL_ID}> channel.",
                 color=discord.Color.red()
             )
             await ctx.send(embed=error_embed, delete_after=15)
@@ -996,10 +1014,10 @@ class AdminCommands(commands.Cog):
 
         # 2. Map the amount to the correct role
         role_map = {
-            10: (self.bot.ROOKIE_ROLE_ID, "Odogwu Rookie"),
-            15: (self.bot.ELITE_ROLE_ID, "Odogwu Elite"),
-            20: (self.bot.SUPREME_ROLE_ID, "Odogwu Supreme"),
-            50: (self.bot.VIP_ROLE_ID, "1st Circle (VIP)")
+            10: (config.ROOKIE_ROLE_ID, "Odogwu Rookie"),
+            15: (config.ELITE_ROLE_ID, "Odogwu Elite"),
+            20: (config.SUPREME_ROLE_ID, "Odogwu Supreme"),
+            50: (config.VIP_ROLE_ID, "1st Circle (VIP)")
         }
 
         if amount not in role_map:
@@ -1016,7 +1034,8 @@ class AdminCommands(commands.Cog):
             role_not_found_embed = discord.Embed(title="❌ Role Not Found",
                                                  description=f"A role with the ID `{role_id}` could not be found.",
                                                  color=discord.Color.red())
-            await ctx.send(embed=role_not_found_embed, delete_after=10)
+            await ctx.send(embed=role_not_found_embed, delete_after=15)
+            logger.error(f"Error❌: Role ID {role_id} for amount {amount} not found in guild.")
             return
 
         if role in member.roles:
@@ -1026,25 +1045,49 @@ class AdminCommands(commands.Cog):
             await ctx.send(embed=already_has_role_embed, delete_after=10)
             return
 
-        # 4. Add the role to the user
-        await member.add_roles(role)
+        try:
+            # 4. Add the role to the user
+            await member.add_roles(role)
 
-        # 5. Send confirmation messages
-        confirm_channel = self.bot.get_channel(self.bot.PAYMENT_CHANNEL_ID)
-        if confirm_channel:
-            user_embed = discord.Embed(title="🎉 Payment Confirmed!",
-                                       description=f"Your payment has been confirmed and you’ve been assigned the **{role_name}** role!",
-                                       color=discord.Color.green())
-            user_embed.set_footer(text="Thank you for your support!")
-            await confirm_channel.send(member.mention, embed=user_embed)
+            # 5. Send confirmation messages
+            confirm_channel = self.bot.get_channel(config.PAYMENT_CHANNEL_ID)
+            if confirm_channel:
+                try:
+                    user_embed = discord.Embed(title="🎉 Payment Confirmed!",
+                                               description=f"Your payment has been confirmed and you’ve been assigned the **{role_name}** role!",
+                                               color=discord.Color.green())
+                    user_embed.set_footer(text="Thank you for your support!")
+                    await confirm_channel.send(member.mention, embed=user_embed)
+                except discord.Forbidden:
+                    logger.error(f"Bot is missing permissions to send message to payment channel ({config.PAYMENT_CHANNEL_ID}).")
+            else:
+                logger.warning(f"Payment confirmation channel (ID: {config.PAYMENT_CHANNEL_ID}) not found.")
 
-        mod_confirm_embed = discord.Embed(title="✅ Payment Approved",
-                                          description=f"Successfully assigned **{role_name}** to {member.mention}.",
-                                          color=discord.Color.green())
-        mod_confirm_embed.add_field(name="Amount", value=f"${amount}", inline=True)
-        mod_confirm_embed.add_field(name="User", value=member.mention, inline=True)
-        mod_confirm_embed.set_footer(text=f"Action by {ctx.author.name}")
-        await ctx.send(embed=mod_confirm_embed, delete_after=10)
+            # Send a confirmation message to the moderator
+            mod_confirm_embed = discord.Embed(title="✅ Payment Approved",
+                                              description=f"Successfully assigned **{role_name}** to {member.mention}.",
+                                              color=discord.Color.green())
+            mod_confirm_embed.add_field(name="Amount", value=f"${amount}", inline=True)
+            mod_confirm_embed.add_field(name="User", value=member.mention, inline=True)
+            mod_confirm_embed.set_footer(text=f"Action by {ctx.author.name}")
+            await ctx.send(embed=mod_confirm_embed)
+
+        except discord.Forbidden:
+            forbidden_embed = discord.Embed(
+                title="❌ Bot Permissions Error",
+                description=f"The bot does not have permissions to add the **{role_name}** role.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=forbidden_embed, delete_after=10)
+            logger.error(f"Bot missing permissions to add role '{role.name}' to {member.display_name}.")
+        except discord.HTTPException as e:
+            http_error_embed = discord.Embed(
+                title="❌ An Error Occurred",
+                description=f"An error occurred while adding the role: `{e}`",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=http_error_embed, delete_after=10)
+            logger.error(f"HTTP Error adding role '{role.name}' to {member.display_name}: {e}")
 
     # === CONSOLIDATED: !points command to show all-time points, available points, and rank ===
     @commands.command(name='points', help="Displays the points of a specific member or the user who ran the command.")
@@ -1054,9 +1097,9 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.LEADERBOARD_CHANNEL_ID:
+        if ctx.channel.id != config.LEADERBOARD_CHANNEL_ID:
             error_embed = discord.Embed(title="❌ Incorrect Channel",
-                                        description=f"This command can only be used in the <#{self.bot.LEADERBOARD_CHANNEL_ID}> channel.",
+                                        description=f"This command can only be used in the <#{config.LEADERBOARD_CHANNEL_ID}> channel.",
                                         color=discord.Color.red())
             await ctx.send(embed=error_embed, delete_after=10)
             return
@@ -1081,7 +1124,7 @@ class AdminCommands(commands.Cog):
                 break
 
         # 3. Build and send the embed
-        usd_value = available_points * self.bot.POINTS_TO_USD
+        usd_value = available_points * config.POINTS_TO_USD
         embed = discord.Embed(title="💰 Points & Rank",
                               description=f"Here is the points summary for {target_member.mention}.",
                               color=discord.Color.gold())
@@ -1106,9 +1149,9 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.GIVEAWAY_CHANNEL_ID:
+        if ctx.channel.id != config.GIVEAWAY_CHANNEL_ID:
             embed = discord.Embed(title="❌ Incorrect Channel",
-                                  description=f"This command can only be used in the <#{self.bot.GIVEAWAY_CHANNEL_ID}> channel.",
+                                  description=f"This command can only be used in the <#{config.GIVEAWAY_CHANNEL_ID}> channel.",
                                   color=discord.Color.red())
             await ctx.send(embed=embed, delete_after=10)
             return
@@ -1146,7 +1189,7 @@ class AdminCommands(commands.Cog):
             self.bot.user_points[user_id]["available_points"] += points_to_add
 
             # Corrected the call to the helper function
-            await self._log_points_transaction(user_id, points_to_add, purpose)
+            await self.bot.log_points_transaction(user_id, points_to_add, purpose)
 
             winner_entry = {"user_id": user_id, "points": points_to_add, "purpose": purpose,
                             "timestamp": datetime.now(UTC).isoformat()}
@@ -1178,9 +1221,9 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.GIVEAWAY_CHANNEL_ID:
+        if ctx.channel.id != config.GIVEAWAY_CHANNEL_ID:
             embed = discord.Embed(title="❌ Incorrect Channel",
-                                  description=f"This command can only be used in the <#{self.bot.GIVEAWAY_CHANNEL_ID}> channel.",
+                                  description=f"This command can only be used in the <#{config.GIVEAWAY_CHANNEL_ID}> channel.",
                                   color=discord.Color.red())
             await ctx.send(embed=embed, delete_after=10)
             return
@@ -1236,7 +1279,7 @@ class AdminCommands(commands.Cog):
             self.bot.user_points[user_id]["all_time_points"] += points
             self.bot.user_points[user_id]["available_points"] += points
 
-            await self._log_points_transaction(user_id, points, purpose)
+            await self.bot.log_points_transaction(user_id, points, purpose)
 
             winner_entry = {"user_id": user_id, "points": points, "purpose": purpose,
                             "timestamp": datetime.now(UTC).isoformat()}
@@ -1271,9 +1314,9 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.LEADERBOARD_CHANNEL_ID:
+        if ctx.channel.id != config.LEADERBOARD_CHANNEL_ID:
             error_embed = discord.Embed(title="❌ Incorrect Channel",
-                                        description=f"This command can only be used in the <#{self.bot.LEADERBOARD_CHANNEL_ID}> channel.",
+                                        description=f"This command can only be used in the <#{config.LEADERBOARD_CHANNEL_ID}> channel.",
                                         color=discord.Color.red())
             await ctx.send(embed=error_embed, delete_after=10)
             return
@@ -1287,7 +1330,7 @@ class AdminCommands(commands.Cog):
         for uid, data in self.bot.user_points.items():
             member = ctx.guild.get_member(int(uid))
             if member and not any(
-                    role.id in [self.bot.ADMIN_ROLE_ID, self.bot.MOD_ROLE_ID] for role in member.roles) and data.get(
+                    role.id in [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID] for role in member.roles) and data.get(
                     'all_time_points', 0) > 0:
                 eligible_users[uid] = data
 
@@ -1335,9 +1378,9 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.LEADERBOARD_CHANNEL_ID:
+        if ctx.channel.id != config.LEADERBOARD_CHANNEL_ID:
             error_embed = discord.Embed(title="❌ Incorrect Channel",
-                                        description=f"This command can only be used in the <#{self.bot.LEADERBOARD_CHANNEL_ID}> channel.",
+                                        description=f"This command can only be used in the <#{config.LEADERBOARD_CHANNEL_ID}> channel.",
                                         color=discord.Color.red())
             await ctx.send(embed=error_embed, delete_after=10)
             return
@@ -1347,7 +1390,7 @@ class AdminCommands(commands.Cog):
         for user_id, data in self.bot.user_points.items():
             member = ctx.guild.get_member(int(user_id))
             if member and not any(
-                    role.id in [self.bot.ADMIN_ROLE_ID, self.bot.MOD_ROLE_ID] for role in member.roles) and data[
+                    role.id in [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID] for role in member.roles) and data[
                 'all_time_points'] > 0:
                 eligible_users[user_id] = data
 
@@ -1382,7 +1425,7 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.PAYOUT_REQUEST_CHANNEL_ID:
+        if ctx.channel.id != config.PAYOUT_REQUEST_CHANNEL_ID:
             return
 
         # 2. Validate input
@@ -1400,8 +1443,8 @@ class AdminCommands(commands.Cog):
             return
 
         exchange = exchange.lower()
-        if exchange not in self.bot.APPROVED_EXCHANGES:
-            approved_list = ", ".join([e.capitalize() for e in self.bot.APPROVED_EXCHANGES])
+        if exchange not in config.APPROVED_EXCHANGES:
+            approved_list = ", ".join([e.capitalize() for e in config.APPROVED_EXCHANGES])
             embed = discord.Embed(title="❌ Invalid Exchange",
                                   description=f"Only these exchanges are accepted: **{approved_list}**",
                                   color=discord.Color.red())
@@ -1413,14 +1456,14 @@ class AdminCommands(commands.Cog):
         user_data = self.bot.user_points.get(user_id, {"all_time_points": 0.0, "available_points": 0.0})
         balance = user_data.get("available_points", 0.0)
 
-        if amount < self.bot.MIN_PAYOUT_AMOUNT:
+        if amount < config.MIN_PAYOUT_AMOUNT:
             embed = discord.Embed(title="⚠️ Payout Amount Too Low",
-                                  description=f"The minimum payout amount is **{self.bot.MIN_PAYOUT_AMOUNT:.2f} points**.",
+                                  description=f"The minimum payout amount is **{config.MIN_PAYOUT_AMOUNT:.2f} points**.",
                                   color=discord.Color.orange())
             await ctx.send(f"{ctx.author.mention}", embed=embed, delete_after=10)
             return
 
-        fee = amount * (self.bot.PAYOUT_FEE_PERCENTAGE / 100)
+        fee = amount * (config.PAYOUT_FEE_PERCENTAGE / 100)
         total_deduction = amount + fee
 
         if balance < total_deduction:
@@ -1445,10 +1488,10 @@ class AdminCommands(commands.Cog):
         embed.add_field(name="Requested Amount", value=f"**{amount:.2f} points**", inline=False)
         embed.add_field(name="Exchange", value=f"**{exchange.capitalize()}**", inline=True)
         embed.add_field(name="UID", value=f"**{uid}**", inline=True)
-        embed.add_field(name="Fee", value=f"**{self.bot.PAYOUT_FEE_PERCENTAGE:.1f}% ({fee:.2f} points)**", inline=False)
+        embed.add_field(name="Fee", value=f"**{config.PAYOUT_FEE_PERCENTAGE:.1f}% ({fee:.2f} points)**", inline=False)
         embed.add_field(name="Total Deduction", value=f"**{total_deduction:.2f} points**", inline=False)
         embed.set_footer(
-            text=f"Please type `!confirmpayout` to finalize the request within {self.bot.CONFIRMATION_TIMEOUT} seconds.")
+            text=f"Please type `!confirmpayout` to finalize the request within {config.CONFIRMATION_TIMEOUT} seconds.")
         await ctx.send(f"{ctx.author.mention}", embed=embed)
 
     # === !CONFIRM-PAYOUT ===
@@ -1461,9 +1504,9 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.PAYOUT_REQUEST_CHANNEL_ID:
+        if ctx.channel.id != config.PAYOUT_REQUEST_CHANNEL_ID:
             embed = discord.Embed(title="❌ Incorrect Channel",
-                                  description=f"This command can only be used in the <#{self.bot.PAYOUT_REQUEST_CHANNEL_ID}> channel.",
+                                  description=f"This command can only be used in the <#{config.PAYOUT_REQUEST_CHANNEL_ID}> channel.",
                                   color=discord.Color.red())
             await ctx.send(embed=embed, delete_after=10)
             return
@@ -1480,7 +1523,7 @@ class AdminCommands(commands.Cog):
             await ctx.send(embed=embed, delete_after=10)
             return
 
-        if time.time() - pending_payout["timestamp"] > self.bot.CONFIRMATION_TIMEOUT:
+        if time.time() - pending_payout["timestamp"] > config.CONFIRMATION_TIMEOUT:
             if "pending_payout" in user_data:
                 del user_data["pending_payout"]
                 self.bot.user_points[user_id] = user_data
@@ -1507,7 +1550,7 @@ class AdminCommands(commands.Cog):
         # We removed both save_data() calls. The periodic task handles this.
 
         # 4. Notify the user and moderators
-        mod_channel = self.bot.get_channel(self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID)
+        mod_channel = self.bot.get_channel(config.MOD_PAYMENT_REVIEW_CHANNEL_ID)
         if mod_channel:
             mod_embed = discord.Embed(title="📤 New Payout Request",
                                       description="A new payout request has been submitted for review.",
@@ -1522,7 +1565,7 @@ class AdminCommands(commands.Cog):
             mod_embed.set_footer(text="Use `!paid <@user>` to confirm this payment.")
             await mod_channel.send(embed=mod_embed)
         else:
-            logger.warning(f"Could not find mod channel with ID: {self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID}")
+            logger.warning(f"Could not find mod channel with ID: {config.MOD_PAYMENT_REVIEW_CHANNEL_ID}")
 
         user_embed = discord.Embed(title="✅ Payout Submitted",
                                    description=f"Your payout request for **{pending_payout['amount']:.2f} points** has been successfully submitted for review.",
@@ -1542,7 +1585,7 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID:
+        if ctx.channel.id != config.MOD_PAYMENT_REVIEW_CHANNEL_ID:
             return
 
         user_id = str(member.id)
@@ -1564,10 +1607,10 @@ class AdminCommands(commands.Cog):
             await ctx.send(embed=embed, delete_after=10)
             return
 
-        payout_channel = self.bot.get_channel(self.bot.PAYOUT_REQUEST_CHANNEL_ID)
+        payout_channel = self.bot.get_channel(config.PAYOUT_REQUEST_CHANNEL_ID)
         if not payout_channel:
             embed = discord.Embed(title="❌ Configuration Error",
-                                  description=f"The payout channel (ID: `{self.bot.PAYOUT_REQUEST_CHANNEL_ID}`) could not be found. Please check your configuration.",
+                                  description=f"The payout channel (ID: `{config.PAYOUT_REQUEST_CHANNEL_ID}`) could not be found. Please check your configuration.",
                                   color=discord.Color.red())
             await ctx.send(embed=embed, delete_after=10)
             return
@@ -1610,20 +1653,20 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.XP_REWARD_CHANNEL_ID:
-            await ctx.send(f"❌ The `!xp` command can only be used in the <#{self.bot.XP_REWARD_CHANNEL_ID}> channel.",
+        if ctx.channel.id != config.XP_REWARD_CHANNEL_ID:
+            await ctx.send(f"❌ The `!xp` command can only be used in the <#{config.XP_REWARD_CHANNEL_ID}> channel.",
                            delete_after=15)
             return
 
         target_member = member if member else ctx.author
         user_id = str(target_member.id)
-        guild = self.bot.get_guild(self.bot.SERVER_ID)
+        guild = self.bot.get_guild(config.SERVER_ID)
         if not guild:
             logger.error("Could not find the server. Please check the SERVER_ID constant.")
             await ctx.send("❌ Error: Could not find the server. Please check the SERVER_ID constant.", delete_after=15)
             return
 
-        allowed_roles = [self.bot.ADMIN_ROLE_ID, self.bot.MOD_ROLE_ID]
+        allowed_roles = [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID]
         all_users = []
         for uid, data in self.bot.user_xp.items():
             member_obj = guild.get_member(int(uid))
@@ -1689,9 +1732,9 @@ class AdminCommands(commands.Cog):
         # We removed both save_data() calls. The periodic task handles this.
 
         # 2. Post new quests and send confirmation
-        board = self.bot.get_channel(self.bot.QUEST_BOARD_CHANNEL_ID)
+        board = self.bot.get_channel(config.QUEST_BOARD_CHANNEL_ID)
         if not board:
-            logger.warning(f"Quest board channel (ID: {self.bot.QUEST_BOARD_CHANNEL_ID}) not found.")
+            logger.warning(f"Quest board channel (ID: {config.QUEST_BOARD_CHANNEL_ID}) not found.")
             error_embed = discord.Embed(title="❌ Configuration Error",
                                         description="The quest board channel could not be found. Please check the `QUEST_BOARD_CHANNEL_ID`.",
                                         color=discord.Color.red())
@@ -1719,9 +1762,9 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.QUEST_SUBMIT_CHANNEL_ID:
+        if ctx.channel.id != config.QUEST_SUBMIT_CHANNEL_ID:
             embed = discord.Embed(title="❌ Incorrect Channel",
-                                  description=f"Please use the <#{self.bot.QUEST_SUBMIT_CHANNEL_ID}> channel to submit quests.",
+                                  description=f"Please use the <#{config.QUEST_SUBMIT_CHANNEL_ID}> channel to submit quests.",
                                   color=discord.Color.red())
             await ctx.send(embed=embed, delete_after=10)
             return
@@ -1781,7 +1824,7 @@ class AdminCommands(commands.Cog):
         # We removed the save_data() call. The periodic task handles this.
 
         # 4. Notify moderators and the user
-        mod_review_channel = self.bot.get_channel(self.bot.MOD_QUEST_REVIEW_CHANNEL_ID)
+        mod_review_channel = self.bot.get_channel(config.MOD_QUEST_REVIEW_CHANNEL_ID)
         if mod_review_channel:
             embed = discord.Embed(title="🧩 New Quest Submission",
                                   description=f"A new quest has been submitted for review by {ctx.author.mention}.",
@@ -1793,7 +1836,7 @@ class AdminCommands(commands.Cog):
             embed.set_footer(text=f"To verify: !verifyquest {user_id} {quest_number} <approve|reject>")
             await mod_review_channel.send(embed=embed)
         else:
-            logger.warning(f"Mod quest review channel (ID: {self.bot.MOD_QUEST_REVIEW_CHANNEL_ID}) not found.")
+            logger.warning(f"Mod quest review channel (ID: {config.MOD_QUEST_REVIEW_CHANNEL_ID}) not found.")
 
         embed = discord.Embed(title="✅ Submission Received!",
                               description=f"Your submission for **Quest {quest_number}** has been received and sent for review.",
@@ -1808,9 +1851,9 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Check for the correct channel
-        if ctx.channel.id != self.bot.MOD_QUEST_REVIEW_CHANNEL_ID:
+        if ctx.channel.id != config.MOD_QUEST_REVIEW_CHANNEL_ID:
             embed = discord.Embed(title="❌ Incorrect Channel",
-                                  description=f"This command can only be used in the <#{self.bot.MOD_QUEST_REVIEW_CHANNEL_ID}> channel.",
+                                  description=f"This command can only be used in the <#{config.MOD_QUEST_REVIEW_CHANNEL_ID}> channel.",
                                   color=discord.Color.red())
             await ctx.send(embed=embed, delete_after=10)
             return
@@ -1845,7 +1888,7 @@ class AdminCommands(commands.Cog):
 
         # 3. Process action (approve/reject)
         if action == "approve":
-            points_to_award = self.bot.QUEST_POINTS
+            points_to_award = config.QUEST_POINTS
             if self.bot.admin_points.get("balance", 0) < points_to_award:
                 embed = discord.Embed(title="❌ Admin Balance Too Low",
                                       description=f"The admin balance is too low to award **{points_to_award:.2f} points**.",
@@ -1869,12 +1912,12 @@ class AdminCommands(commands.Cog):
                 if normalized_url not in self.bot.approved_proofs:
                     self.bot.approved_proofs.append(normalized_url)
 
-            await self._log_points_transaction(user_id, points_to_award, f"Quest {quest_number} approval")
+            await self.bot.log_points_transaction(user_id, points_to_award, f"Quest {quest_number} approval")
 
             # We removed all four save_data() calls. The periodic task handles this.
 
             # Send an approval message to the user channel
-            user_channel = self.bot.get_channel(self.bot.QUEST_SUBMIT_CHANNEL_ID)
+            user_channel = self.bot.get_channel(config.QUEST_SUBMIT_CHANNEL_ID)
             user_embed = discord.Embed(title="✨ Quest Approved! ✨",
                                        description=f"🎉 Congratulations, {member.mention}! Your submission for **Quest {quest_number}** has been **approved**!",
                                        color=discord.Color.green())
@@ -1891,7 +1934,7 @@ class AdminCommands(commands.Cog):
             quest_data[str(quest_number)]["status"] = "rejected"
 
             # Send a rejection message to the user channel
-            user_channel = self.bot.get_channel(self.bot.QUEST_SUBMIT_CHANNEL_ID)
+            user_channel = self.bot.get_channel(config.QUEST_SUBMIT_CHANNEL_ID)
             user_embed = discord.Embed(title="❌ Quest Rejected",
                                        description=f"Hello, {member.mention}. Your submission for **Quest {quest_number}** was **rejected**.",
                                        color=discord.Color.red())
@@ -1926,18 +1969,18 @@ class AdminCommands(commands.Cog):
 
         # Check 2: Category and emoji
         if reaction.message.channel.category is None or \
-                reaction.message.channel.category.id not in self.bot.REACTION_CATEGORY_IDS or \
+                reaction.message.channel.category.id not in config.REACTION_CATEGORY_IDS or \
                 str(reaction.emoji) != self.bot.REACTION_EMOJI:
             return
 
         # Check 3: Role and admin balance
         reactor_member = reaction.message.guild.get_member(user.id)
-        allowed_roles = [self.bot.ADMIN_ROLE_ID, self.bot.MOD_ROLE_ID]
+        allowed_roles = [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID]
         if not reactor_member or (not reactor_member.guild_permissions.administrator and not any(
                 role.id in allowed_roles for role in reactor_member.roles)):
             return
 
-        points_to_add = random.uniform(self.bot.MIN_REACTION_POINTS, self.bot.MAX_REACTION_POINTS)
+        points_to_add = random.uniform(config.MIN_REACTION_POINTS, config.MAX_REACTION_POINTS)
         if 'balance' not in self.bot.admin_points or self.bot.admin_points['balance'] < points_to_add:
             logger.warning(f"Admin balance too low. Award of {points_to_add:.2f} points failed.")
             return
@@ -1960,7 +2003,7 @@ class AdminCommands(commands.Cog):
         self.bot.admin_points["in_circulation"] = self.bot.admin_points.get("in_circulation", 0.0) + points_to_add
 
         # Log the transaction in memory
-        await self._log_points_transaction(user_id, points_to_add, f"Reaction award from {user.name}")
+        await self.bot.log_points_transaction(user_id, points_to_add, f"Reaction award from {user.name}")
 
         # Add reaction to the processed set
         self.bot.processed_reactions.add(reaction_identifier)
@@ -1998,7 +2041,7 @@ class AdminCommands(commands.Cog):
             return
 
         # 1. Archive the channel and remove user permissions
-        archived_category = self.bot.get_channel(self.bot.ARCHIVED_TICKETS_CATEGORY_ID)
+        archived_category = self.bot.get_channel(config.ARCHIVED_TICKETS_CATEGORY_ID)
         if not archived_category:
             await ctx.send("❌ The archived tickets category was not found.", delete_after=10)
             return
@@ -2024,10 +2067,10 @@ class AdminCommands(commands.Cog):
         # Delete the command message immediately
         await ctx.message.delete()
 
-        announcement_channel = self.bot.get_channel(self.bot.ANNOUNCEMENT_CHANNEL_ID)
+        announcement_channel = self.bot.get_channel(config.ANNOUNCEMENT_CHANNEL_ID)
         if not announcement_channel:
             await ctx.send("❌ Announcement channel not found. Please check the ID.", delete_after=10)
-            logger.error(f"Announcement channel not found. ID: {self.bot.ANNOUNCEMENT_CHANNEL_ID}")
+            logger.error(f"Announcement channel not found. ID: {config.ANNOUNCEMENT_CHANNEL_ID}")
             return
 
         embed = discord.Embed(title=title, description=message, color=discord.Color.blue())
@@ -2045,8 +2088,8 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # 1. Validation Checks
-        if ctx.channel.id != self.bot.MYSTERYBOX_CHANNEL_ID:
-            await ctx.send(f"❌ Use this command in <#{self.bot.MYSTERYBOX_CHANNEL_ID}> only.", delete_after=8)
+        if ctx.channel.id != config.MYSTERYBOX_CHANNEL_ID:
+            await ctx.send(f"❌ Use this command in <#{config.MYSTERYBOX_CHANNEL_ID}> only.", delete_after=8)
             return
 
         user_id = str(ctx.author.id)
@@ -2060,24 +2103,24 @@ class AdminCommands(commands.Cog):
                            delete_after=8)
             return
 
-        if self.bot.get_user_balance(user_id) < self.bot.MYSTERYBOX_COST:
-            await ctx.send(f"❌ You need **{self.bot.MYSTERYBOX_COST} MVpts** to open a Mystery Box.", delete_after=8)
+        if self.bot.get_user_balance(user_id) < config.MYSTERYBOX_COST:
+            await ctx.send(f"❌ You need **{config.MYSTERYBOX_COST} MVpts** to open a Mystery Box.", delete_after=8)
             return
 
         # 2. Process Transaction in Memory
         self.bot.ensure_user(user_id)
-        self.bot.user_points[user_id]["available_points"] -= self.bot.MYSTERYBOX_COST
-        await self._log_points_transaction(user_id, -float(self.bot.MYSTERYBOX_COST), "Mystery Box: cost")
+        self.bot.user_points[user_id]["available_points"] -= config.MYSTERYBOX_COST
+        await self.bot.log_points_transaction(user_id, -float(config.MYSTERYBOX_COST), "Mystery Box: cost")
 
-        reward = random.choices(self.bot.MYSTERYBOX_REWARDS, weights=self.bot.MYSTERYBOX_WEIGHTS, k=1)[0]
+        reward = random.choices(config.MYSTERYBOX_REWARDS, weights=config.MYSTERYBOX_WEIGHTS, k=1)[0]
 
         self.bot.user_points[user_id]["available_points"] += reward
         self.bot.user_points[user_id]["all_time_points"] += reward
-        await self._log_points_transaction(user_id, float(reward), "Mystery Box: reward")
+        await self.bot.log_points_transaction(user_id, float(reward), "Mystery Box: reward")
 
         # Handle point flow based on the reward
-        if reward > self.bot.MYSTERYBOX_COST:
-            delta = reward - self.bot.MYSTERYBOX_COST
+        if reward > config.MYSTERYBOX_COST:
+            delta = reward - config.MYSTERYBOX_COST
             if self.bot.admin_can_issue(delta):
                 self.bot.admin_points["balance"] -= delta
                 self.bot.admin_points["in_circulation"] += delta
@@ -2085,9 +2128,9 @@ class AdminCommands(commands.Cog):
                 self.bot.user_points[user_id]["available_points"] -= delta
                 self.bot.user_points[user_id]["all_time_points"] -= delta
                 logger.warning("Admin balance too low to cover Mystery Box win. Award capped at cost.")
-                reward = self.bot.MYSTERYBOX_COST
-        elif reward < self.bot.MYSTERYBOX_COST:
-            burn = self.bot.MYSTERYBOX_COST - reward
+                reward = config.MYSTERYBOX_COST
+        elif reward < config.MYSTERYBOX_COST:
+            burn = config.MYSTERYBOX_COST - reward
             self.bot.admin_points["burned"] = self.bot.admin_points.get("burned", 0) + burn
             # The claimed points decrease as a result of a user-initiated burn
             self.bot.admin_points["in_circulation"] -= burn
@@ -2096,18 +2139,18 @@ class AdminCommands(commands.Cog):
         self.bot.mb_add_use(user_id)
 
         # 3. Notifications and Logging
-        log_ch = self.bot.get_channel(self.bot.COMMAND_LOG_CHANNEL_ID)
+        log_ch = self.bot.get_channel(config.COMMAND_LOG_CHANNEL_ID)
         if log_ch:
             await log_ch.send(f"🎁 Mystery Box used by <@{user_id}> — reward: **{reward}** MVpts")
 
-        color = discord.Color.green() if reward >= self.bot.MYSTERYBOX_COST else discord.Color.orange()
+        color = discord.Color.green() if reward >= config.MYSTERYBOX_COST else discord.Color.orange()
         embed = discord.Embed(
             title="🎁 Mystery Box Opened!",
-            description=f"{ctx.author.mention} you spent **{self.bot.MYSTERYBOX_COST} MVpts** and received:",
+            description=f"{ctx.author.mention} you spent **{config.MYSTERYBOX_COST} MVpts** and received:",
             color=color
         )
         embed.add_field(name="Reward", value=f"💎 **{reward} points**", inline=False)
-        embed.set_footer(text="Good luck next time!" if reward < self.bot.MYSTERYBOX_COST else "Nice hit!")
+        embed.set_footer(text="Good luck next time!" if reward < config.MYSTERYBOX_COST else "Nice hit!")
         embed.timestamp = datetime.now(UTC)
         await ctx.send(embed=embed)
 
@@ -2121,7 +2164,7 @@ class AdminCommands(commands.Cog):
             f"(ID: {ctx.author.id}) in channel {ctx.channel.name}."
         )
 
-        log_channel = ctx.guild.get_channel(self.bot.COMMAND_LOG_CHANNEL_ID)
+        log_channel = ctx.guild.get_channel(config.COMMAND_LOG_CHANNEL_ID)
         if log_channel:
             embed = discord.Embed(
                 title="Command Executed",
@@ -2178,7 +2221,7 @@ class AdminCommands(commands.Cog):
         if message.author.bot:
             return
         # --- 1. Ticket System Logic (if applicable) ---
-        if message.channel.id == self.bot.SUPPORT_CHANNEL_ID:
+        if message.channel.id == config.SUPPORT_CHANNEL_ID:
             user_id = message.author.id
             if user_id in self.bot.active_tickets.values():
                 embed = discord.Embed(
@@ -2197,8 +2240,8 @@ class AdminCommands(commands.Cog):
 
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                guild.get_role(self.bot.ADMIN_ROLE_ID): discord.PermissionOverwrite(view_channel=True),
-                guild.get_role(self.bot.MOD_ROLE_ID): discord.PermissionOverwrite(view_channel=True),
+                guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(view_channel=True),
+                guild.get_role(config.MOD_ROLE_ID): discord.PermissionOverwrite(view_channel=True),
                 user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
                 guild.get_member(self.bot.user.id): discord.PermissionOverwrite(view_channel=True,
                                                                                 send_messages=True)
@@ -2207,7 +2250,7 @@ class AdminCommands(commands.Cog):
             try:
                 ticket_channel = await guild.create_text_channel(
                     ticket_name,
-                    category=guild.get_channel(self.bot.TICKETS_CATEGORY_ID),
+                    category=guild.get_channel(config.TICKETS_CATEGORY_ID),
                     overwrites=overwrites
                 )
 
@@ -2251,10 +2294,10 @@ class AdminCommands(commands.Cog):
 
 
         # --- 2. VIP Post Logic ---
-        if message.channel.id == self.bot.ENGAGEMENT_CHANNEL_ID:
+        if message.channel.id == config.ENGAGEMENT_CHANNEL_ID:
             # ALL the on_vip_post logic goes here
             member = message.author
-            is_mod_or_admin = any(role.id in [self.bot.ADMIN_ROLE_ID, self.bot.MOD_ROLE_ID] for role in member.roles)
+            is_mod_or_admin = any(role.id in [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID] for role in member.roles)
 
             if is_mod_or_admin:
                 await self.bot.process_commands(message)
@@ -2268,7 +2311,7 @@ class AdminCommands(commands.Cog):
                 self.bot.vip_posts[user_id]["count"] = 0
                 self.bot.vip_posts[user_id]["last_date"] = today
 
-            if self.bot.VIP_ROLE_ID not in [role.id for role in member.roles]:
+            if config.VIP_ROLE_ID not in [role.id for role in member.roles]:
                 await message.delete()
                 await message.channel.send(f"❌ {member.mention}, only **VIP members** can post in this channel!",
                                            delete_after=10)
@@ -2289,18 +2332,18 @@ class AdminCommands(commands.Cog):
             return
 
         # --- 3. Payment Message Logic ---
-        if message.channel.id == self.bot.PAYMENT_CHANNEL_ID:
+        if message.channel.id == config.PAYMENT_CHANNEL_ID:
             # ALL the on_payment_message logic goes here
-            mod_channel = self.bot.get_channel(self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID)
+            mod_channel = self.bot.get_channel(config.MOD_PAYMENT_REVIEW_CHANNEL_ID)
             if not mod_channel:
-                logger.error(f"Payment review channel (ID: {self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID}) not found.")
+                logger.error(f"Payment review channel (ID: {config.MOD_PAYMENT_REVIEW_CHANNEL_ID}) not found.")
                 await self.bot.process_commands(message)
                 return
 
             await message.delete()
 
         files = [await a.to_file() for a in message.attachments] if message.attachments else []
-        mod_channel = self.bot.get_channel(self.bot.MOD_PAYMENT_REVIEW_CHANNEL_ID)
+        mod_channel = self.bot.get_channel(config.MOD_PAYMENT_REVIEW_CHANNEL_ID)
         if mod_channel:
             mod_embed = discord.Embed(
                 title="💰 Payment Confirmation",
@@ -2327,8 +2370,6 @@ class AdminCommands(commands.Cog):
             await message.channel.send(embed=user_embed, delete_after=45)
             logger.info("Deleted user payment message and sent confirmation.")
 
-            await self.bot.process_commands(message)
-            return
 
         # --- 4. XP and Moderation Logic (applies to ALL messages) ---
         # This logic should be placed at the end if it's meant to run for all messages.

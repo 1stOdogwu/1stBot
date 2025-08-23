@@ -7,7 +7,7 @@ import asyncio
 
 from database import load_data, save_data
 from logger import bot_logger as logger
-from utils import manage_periodic_message
+import config
 
 class TasksCog(commands.Cog):
     def __init__(self, bot):
@@ -38,7 +38,7 @@ class TasksCog(commands.Cog):
             return
 
         # Process only GM/MV points in the designated channel
-        if message.channel.id == self.bot.GM_MV_CHANNEL_ID:
+        if message.channel.id == config.GM_MV_CHANNEL_ID:
             content = message.content.lower().strip()
 
             # Check if the message is exactly "gm" or "mv"
@@ -48,40 +48,34 @@ class TasksCog(commands.Cog):
 
                 if self.bot.gm_log.get(user_id) != today:
                     # Check if the author is an admin
-                    is_author_admin = any(role.id == self.bot.ADMIN_ROLE_ID for role in message.author.roles)
+                    is_author_admin = any(role.id == config.ADMIN_ROLE_ID for role in message.author.roles)
 
                     if is_author_admin:
-                        self.bot.admin_points["balance"] -= self.bot.GM_MV_POINTS_REWARD
-                        self.bot.admin_points["my_points"] += self.bot.GM_MV_POINTS_REWARD
-                        self.bot.admin_points["in_circulation"] += self.bot.GM_MV_POINTS_REWARD
-
-                        await self.bot.log_points_transaction(
-                            user_id,
-                            points=self.bot.GM_MV_POINTS_REWARD,
-                            purpose="GM Points"
-                        )
+                        self.bot.admin_points["balance"] -= config.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["my_points"] += config.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["in_circulation"] += config.GM_MV_POINTS_REWARD
 
                     else:
-                        if self.bot.admin_points["balance"] < self.bot.GM_MV_POINTS_REWARD:
+                        if self.bot.admin_points["balance"] < config.GM_MV_POINTS_REWARD:
                             logger.warning("⚠️ Admin balance is too low to award GM points. Skipping.")
                             await message.channel.send("⚠️ An error occurred. Please contact an admin.",
                                                        delete_after=10)
                             return
 
                         user_data = self.bot.user_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
-                        user_data["all_time_points"] += self.bot.GM_MV_POINTS_REWARD
-                        user_data["available_points"] += self.bot.GM_MV_POINTS_REWARD
+                        user_data["all_time_points"] += config.GM_MV_POINTS_REWARD
+                        user_data["available_points"] += config.GM_MV_POINTS_REWARD
 
-                        self.bot.admin_points["balance"] -= self.bot.GM_MV_POINTS_REWARD
-                        self.bot.admin_points["in_circulation"] += self.bot.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["balance"] -= config.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["in_circulation"] += config.GM_MV_POINTS_REWARD
 
                     # Common logic for both admins and non-admins
-                    await self.bot.log_points_transaction(user_id, self.bot.GM_MV_POINTS_REWARD, "GM points")
+                    await self.bot.log_points_transaction(user_id, config.GM_MV_POINTS_REWARD, "GM points")
                     self.bot.gm_log[user_id] = today
 
                     embed = discord.Embed(
                         title="🎉 GM/MV Points Awarded! 🎉",
-                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{self.bot.GM_MV_POINTS_REWARD:.2f} points** for your GM/MV message.",
+                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{config.GM_MV_POINTS_REWARD:.2f} points** for your GM/MV message.",
                         color=discord.Color.gold()
                     )
                     embed.set_image(url="https://media.tenor.com/Fw5m_qY3S2gAAAAC/puffed-celebration.gif")
@@ -96,6 +90,7 @@ class TasksCog(commands.Cog):
     async def save_logs_periodically(self):
         await self.bot.wait_until_ready()
         logger.info("Starting periodic data save...")
+        await self.bot.save_all_data_to_db()
 
         try:
             self.bot.save_data("points_history_table", self.bot.points_history)
@@ -129,36 +124,50 @@ class TasksCog(commands.Cog):
         """Periodically updates the economy status message in a dedicated channel."""
         await self.bot.wait_until_ready()
 
+        # Get the cog that has the get_economy_embed function
+        commands_cog = self.bot.get_cog("AdminCommands")
+        if not commands_cog:
+            logger.error("❌ AdminCommands cog not found. Cannot generate economy embed.")
+            return
+
         try:
             channel = self.bot.get_channel(self.bot.FIRST_ODOGWU_CHANNEL_ID)
             if not channel:
                 logger.error(f"❌ Error: Economy updates channel (ID: {self.bot.FIRST_ODOGWU_CHANNEL_ID}) not found.")
                 return
 
-            commands_cog = self.bot.get_cog("AdminCommands")
-            if not commands_cog:
-                logger.error("❌ AdminCommands cog not found. Cannot generate economy embed.")
-                return
-
+            # Get the embed from the AdminCommands cog
             economy_embed = await commands_cog.get_economy_embed()
 
-            # Replaced the entire if/else block with this single function call
-            await manage_periodic_message(
-                bot=self.bot,
-                channel=channel,
-                bot_data=self.bot.bot_data,
-                message_id_key="economy_message_id",
-                embed=economy_embed,
-                pin=False  # You can set this to True if you want it pinned
-            )
+            # Access the message ID from the bot's data
+            economy_message_id = self.bot.bot_data.get("economy_message_id")
 
+            if economy_message_id:
+                try:
+                    message = await channel.fetch_message(economy_message_id)
+                    await message.edit(embed=economy_embed)
+                    logger.info("✅ Economy message updated successfully.")
+                except discord.NotFound:
+                    # If the message was deleted, send a new one and save its ID
+                    message = await channel.send(embed=economy_embed)
+                    self.bot.bot_data["economy_message_id"] = message.id
+                    logger.info("✅ Old economy message not found. A new one has been sent.")
+                except discord.Forbidden:
+                    logger.error(
+                        f"❌ Bot missing permissions to edit message in channel ({self.bot.FIRST_ODOGWU_CHANNEL_ID}).")
+            else:
+                # If there is no existing message ID, send a new message and save its ID
+                message = await channel.send(embed=economy_embed)
+                self.bot.bot_data["economy_message_id"] = message.id
+                logger.info("✅ New economy message sent and its ID saved.")
+
+            # We need to save the data immediately after updating the message ID
             self.bot.save_data("bot_data_table", self.bot.bot_data)
-            logger.info("✅ Economy message updated successfully.")
 
         except discord.Forbidden:
             logger.error(f"❌ Bot missing permissions to send messages in channel ({self.bot.FIRST_ODOGWU_CHANNEL_ID}).")
         except Exception as e:
-            logger.error(f"❌ An unexpected error occurred in the economy update task: {e}")
+            logger.error(f"❌ An unexpected error occurred in the economy update task: {e}", exc_info=True)
 
     #  A L L      L E A D E R B O A R D      M E S S A G E       L O O P
     @tasks.loop(minutes=30)
@@ -179,8 +188,7 @@ class TasksCog(commands.Cog):
                 return
 
             # Use the new utility function for each leaderboard
-            await manage_periodic_message(
-                bot=self.bot,
+            await self.bot.manage_periodic_message(
                 channel=channel,
                 bot_data=self.bot.bot_data,
                 message_id_key="points_leaderboard_message_id",
@@ -188,8 +196,7 @@ class TasksCog(commands.Cog):
                 pin=True
             )
 
-            await manage_periodic_message(
-                bot=self.bot,
+            await self.bot.manage_periodic_message(
                 channel=channel,
                 bot_data=self.bot.bot_data,
                 message_id_key="referral_leaderboard_message_id",
@@ -197,8 +204,7 @@ class TasksCog(commands.Cog):
                 pin=True
             )
 
-            await manage_periodic_message(
-                bot=self.bot,  # <--- Add this argument
+            await self.bot.manage_periodic_message(
                 channel=channel,
                 bot_data=self.bot.bot_data,
                 message_id_key="xp_leaderboard_message_id",
@@ -213,7 +219,6 @@ class TasksCog(commands.Cog):
             logger.error("Bot is missing permissions to send, edit, or pin messages in the leaderboard channel.")
         except Exception as e:
             logger.error(f"❌ An unexpected error occurred in the leaderboard update task: {e}")
-
     # === W E E K L Y       X P        B O N U S       L  O O P ===
     @tasks.loop(hours=168)
     async def weekly_xp_bonus(self):
@@ -351,7 +356,7 @@ class TasksCog(commands.Cog):
         embed.timestamp = datetime.now(UTC)
 
         # Replaced the original message management logic
-        await manage_periodic_message(
+        await self.bot.manage_periodic_message(
             bot=self.bot,
             channel=channel,
             bot_data=self.bot.bot_data,

@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 # Local application imports
 from database import load_data, save_data
 from logger import bot_logger as logger
+import config
 
 # Load environment variables from .env file
 load_dotenv()
@@ -44,6 +45,8 @@ class MyBot(commands.Bot):
         )
 
         # --- Attach Configuration and Data to the Bot Object ---
+        self.config = config
+        self.save_data = save_data
 
         # Load files that are DICTIONARIES
         self.user_points = load_data("user_points_table", {})
@@ -77,104 +80,46 @@ class MyBot(commands.Bot):
         self.referred_users = set(load_data("referred_users_table", []))
         self.processed_reactions = set(load_data("processed_reactions_table", []))
 
-        # --- Static Configurations ---
-        self.banned_words = ["shit", "sex", "fuck", "mad", "stupid", "idiot", "pussy", "dick", "boobs", "breast",
-                             "asshole", "ass", "dumb"]
-
-        # --- Channel & Role IDs ---
-        self.ANNOUNCEMENT_CHANNEL_ID = 1399073900024959048
-        self.ARCHIVED_TICKETS_CATEGORY_ID = 1403762112362184714
-        self.BURNS_LOG_CHANNEL_ID = 1406022417075273849
-        self.COMMAND_LOG_CHANNEL_ID = 1401443654371115018
-        self.ENGAGEMENT_CHANNEL_ID = 1399127357595582616
-        self.FIRST_ODOGWU_CHANNEL_ID = 1402065169890148454
-        self.GIVEAWAY_CHANNEL_ID = 1402371502875218032
-        self.GM_MV_CHANNEL_ID = 1402045203262603375
-        self.HOW_TO_JOIN_CHANNEL_ID = 1399097281428324362
-        self.LEADERBOARD_CHANNEL_ID = 1399125979644821574
-        self.MOD_PAYMENT_REVIEW_CHANNEL_ID = 1400522100078280815
-        self.MOD_QUEST_REVIEW_CHANNEL_ID = 1399109405995434115
-        self.MOD_TASK_REVIEW_CHANNEL_ID = 1401135862661779466
-        self.MYSTERYBOX_CHANNEL_ID = 1405125500015349780
-        self.PAYMENT_CHANNEL_ID = 1400466642843992074
-        self.PAYOUT_REQUEST_CHANNEL_ID = 1399126179574714368
-        self.PERIODIC_LEADERBOARD_CHANNEL_ID = 1406757660782624789
-        self.POINTS_HISTORY_CHANNEL_ID = 1402322062533726289
-        self.QUEST_BOARD_CHANNEL_ID = 1401388448744472686
-        self.QUEST_SUBMIT_CHANNEL_ID = 1401923217983143966
-        self.SUPPORT_CHANNEL_ID = 1399076745612754944
-        self.TASK_SUBMIT_CHANNEL_ID = 1399072864472268961
-        self.TICKETS_CATEGORY_ID = 1403762721601753260
-        self.XP_REWARD_CHANNEL_ID = 1401145656957206599
-        self.VERIFY_CHANNEL_ID = 1399145888710000791
-        self.VERIFY_MESSAGE_ID = 1399146011125092392
-
-        # --- Payout Configuration ---
-        self.MIN_PAYOUT_AMOUNT = 5000.0
-        self.PAYOUT_FEE_PERCENTAGE = 10
-        self.CONFIRMATION_TIMEOUT = 30
-        self.POINTS_TO_USD = 0.0005
-        self.GM_MV_POINTS_REWARD = 150.0
-        self.APPROVED_EXCHANGES = ["binance", "bitget", "bybit", "mexc", "bingx"]
-
-        # --- MYSTERY-BOX CONFIGURATION ---
-        self.MYSTERYBOX_COST = 1000
-        self.MYSTERYBOX_REWARDS = [900, 800, 1000, 1600]
-        self.MYSTERYBOX_WEIGHTS = [35, 30, 20, 15]
-        self.MYSTERYBOX_MAX_PER_24H = 2
-
-        # --- Role IDs ---
-        self.TIVATED_ROLE_ID = 1399078534672158811
-        self.GAMER_ROLE_ID = 1399096408568758474
-        self.ANIME_ROLE_ID = 1400397464611192914
-        self.VIP_ROLE_ID = 1399079208419983540
-        self.ROOKIE_ROLE_ID = 1400510593664024778
-        self.ELITE_ROLE_ID = 1399095296725614673
-        self.SUPREME_ROLE_ID = 1399077199109423125
-        self.ADMIN_ROLE_ID = 1403069915623329876
-        self.MOD_ROLE_ID = 1401016334338228234
-        self.SERVER_ID = 1132898863548731434
-
-        # --- Referral System Constants ---
-        self.REFERRAL_CHANNEL_ID = 1402737676364550295
-        self.REFERRAL_POINTS_PER_ROLE = {
-            1400510593664024778: 1000.0,
-            1399095296725614673: 1500.0,
-            1399077199109423125: 2000.0,
-            1399079208419983540: 10000.0
-        }
-        self.NEW_MEMBER_POINTS_PER_ROLE = {
-            1400510593664024778: 1000.0,
-            1399095296725614673: 1500.0,
-            1399077199109423125: 2000.0
-        }
-
-        # --- Reaction Award Feature ---
-        self.REACTION_CATEGORY_IDS = [1399082427338592336, 1400397422450184223]
-        self.REACTION_EMOJI = "🌟"
-        self.MIN_REACTION_POINTS = 50.0
-        self.MAX_REACTION_POINTS = 150.0
-        self.MAX_WINNERS_HISTORY = 50
-
-        # --- Static Configurations ---
-        self.POINT_VALUES = {"like": 20, "retweet": 30, "comment": 15}
-        self.ROLE_MULTIPLIERS = {
-            self.ROOKIE_ROLE_ID: 1.0,
-            self.ELITE_ROLE_ID: 1.5,
-            self.SUPREME_ROLE_ID: 2.0,
-            self.VIP_ROLE_ID: 0.0
-        }
-        self.QUEST_POINTS = 100.0
-        self.EMOJI_ROLE_MAP = {
-            ("odogwu", 1399069963045572799): self.TIVATED_ROLE_ID,
-            ("🎮", None): self.GAMER_ROLE_ID,
-            ("🍥", None): self.ANIME_ROLE_ID
-        }
-
         # --- Global Bot State Variables ---
         self.invite_cache = {}
         self.invites_before_join = {}
         self.ticket_messages_to_archive = {}
+
+    async def save_all_data_to_db(self):
+        """
+        Saves all bot data to the database.
+        This is a helper function to be called by the periodic task or commands.
+        """
+        try:
+            # ✅ Use the correct method call: self.save_data(...)
+            await self.save_data("points_history_table", self.points_history)
+            await self.save_data("giveaway_logs_table", self.giveaway_winners_log)
+            await self.save_data("all_time_giveaway_logs_table", self.all_time_giveaway_winners_log)
+            await self.save_data("gm_log_table", self.gm_log)
+            await self.save_data("user_points_table", self.user_points)
+            await self.save_data("admin_points_table", self.admin_points)
+            await self.save_data("submissions_table", self.submissions)
+            await self.save_data("quest_submissions_table", self.quest_submissions)
+            await self.save_data("weekly_quests_table", self.weekly_quests)
+            await self.save_data("referral_data_table", self.referral_data)
+            await self.save_data("approved_proofs_table", self.approved_proofs)
+            await self.save_data("user_xp_table", self.user_xp)
+            await self.save_data("bot_data_table", self.bot_data)
+            await self.save_data("vip_posts_table", self.vip_posts)
+            await self.save_data("pending_referrals_table", self.pending_referrals)
+            await self.save_data("active_tickets_table", self.active_tickets)
+            await self.save_data("mysterybox_uses_table", self.mysterybox_uses)
+
+            # We need to convert sets to lists before saving them
+            await self.save_data("processed_reactions_table", list(self.processed_reactions))
+            await self.save_data("referred_users_table", list(self.referred_users))
+
+            logger.info("✅ All bot data saved to the database.")
+
+        except Exception as e:
+            logger.error(f"❌ An error occurred while saving all data: {e}", exc_info=True)
+
+
 
     # --- Helper Functions (Correctly placed here) ---
     def ensure_user(self, user_id: str):
@@ -213,6 +158,7 @@ class MyBot(commands.Bot):
                 print(f"Failed to load {extension}: {e}")
         print("Cogs loaded. Bot is ready.")
 
+
     async def on_ready(self):
         """Event handler for when the bot has connected to Discord."""
         print('--------------------------------')
@@ -227,6 +173,37 @@ class MyBot(commands.Bot):
             except discord.Forbidden:
                 pass
 
+    async def manage_periodic_message(self, channel, bot_data, message_id_key, embed, pin=False):
+        """Fetches, edits, or creates a periodic message, and saves its ID."""
+        try:
+            message_id = bot_data.get(message_id_key)
+
+            if message_id:
+                try:
+                    message = await channel.fetch_message(message_id)
+                    await message.edit(embed=embed)
+                except discord.NotFound:
+                    new_message = await channel.send(embed=embed)
+                    bot_data[message_id_key] = new_message.id
+                    self.save_data("bot_data_table", bot_data)
+                    if pin:
+                        await new_message.pin()
+                except discord.Forbidden:
+                    logger.error(f"Bot missing permissions to edit/pin message in channel ({channel.id}).")
+            else:
+                new_message = await channel.send(embed=embed)
+                bot_data[message_id_key] = new_message.id
+                self.save_data("bot_data_table", bot_data)
+                if pin:
+                    await new_message.pin()
+
+        except discord.Forbidden:
+            logger.error(f"Bot missing permissions to send message in channel ({channel.id}).")
+        except Exception as e:
+            logger.error(f"An unexpected error occurred in manage_periodic_message: {e}")
+
+
+# P O I N T S     T R A N S A C T I O N      L O G
     async def log_points_transaction(self, user_id, points, purpose):
         """Adds a new entry to the points' history log and updates the channel message."""
         try:
@@ -262,15 +239,15 @@ class MyBot(commands.Bot):
             )
             embed.set_footer(text=f"Transaction logged for {user_name}")
 
-            points_history_channel = self.get_channel(self.POINTS_HISTORY_CHANNEL_ID)
+            points_history_channel = self.get_channel(config.POINTS_HISTORY_CHANNEL_ID)
             if points_history_channel:
                 await points_history_channel.send(embed=embed)
             else:
-                logger.error(f"Points history channel (ID: {self.POINTS_HISTORY_CHANNEL_ID}) not found.")
+                logger.error(f"Points history channel (ID: {config.POINTS_HISTORY_CHANNEL_ID}) not found.")
 
             # 3. Handle the burn log specifically
             if "(burn)" in purpose.lower():
-                burns_channel = self.get_channel(self.BURNS_LOG_CHANNEL_ID)
+                burns_channel = self.get_channel(config.BURNS_LOG_CHANNEL_ID)
                 if burns_channel:
                     burn_embed = discord.Embed(
                         title="🔥 Point Burn Log",
@@ -282,17 +259,10 @@ class MyBot(commands.Bot):
                     burn_embed.set_footer(text=f"Logged by {self.user.name}")
                     await burns_channel.send(embed=burn_embed)
                 else:
-                    logger.error(f"Bot missing permissions or burns channel ({self.BURNS_LOG_CHANNEL_ID}) not found.")
+                    logger.error(f"Bot missing permissions or burns channel ({config.BURNS_LOG_CHANNEL_ID}) not found.")
 
         except Exception as e:
             logger.error(f"An unexpected error occurred while logging a transaction: {e}", exc_info=True)
-
-    async def on_message(self, message):
-        """
-        Handles command processing.
-        NOTE: This passes control to any cogs with on_message events.
-        """
-        await self.process_commands(message)
 
 
 # Create and run the bot instance
