@@ -36,7 +36,7 @@ class AdminCommands(commands.Cog):
 
 # ======== T H E      E M B E D      M E S S A G E        M E C H A N I S M ===
     #  E C O N O M Y     E M B E D     M E S S A G E
-    async def _get_economy_embed(self):
+    async def get_economy_embed(self):
         """
         Builds a premium embed for the economy status message.
         """
@@ -420,7 +420,7 @@ class AdminCommands(commands.Cog):
         """
         await ctx.message.delete()
 
-        economy_embed = await self._get_economy_embed()
+        economy_embed = await self.get_economy_embed()
         await ctx.send(embed=economy_embed)
 
     @is_admin()
@@ -2370,6 +2370,56 @@ class AdminCommands(commands.Cog):
             await message.channel.send(embed=user_embed, delete_after=45)
             logger.info("Deleted user payment message and sent confirmation.")
 
+            await self.bot.process_commands(message)
+            return
+
+        # Process only GM/MV points in the designated channel
+        if message.channel.id == config.GM_MV_CHANNEL_ID:
+            content = message.content.lower().strip()
+
+            # Check if the message is exactly "gm" or "mv"
+            if content == "gm" or content == "mv":
+                user_id = str(message.author.id)
+                today = str(datetime.now(UTC).date())
+
+                if self.bot.gm_log.get(user_id) != today:
+                    # Check if the author is an admin
+                    is_author_admin = any(role.id == config.ADMIN_ROLE_ID for role in message.author.roles)
+
+                    if is_author_admin:
+                        self.bot.admin_points["balance"] -= config.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["my_points"] += config.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["in_circulation"] += config.GM_MV_POINTS_REWARD
+
+                    else:
+                        if self.bot.admin_points["balance"] < config.GM_MV_POINTS_REWARD:
+                            logger.warning("⚠️ Admin balance is too low to award GM points. Skipping.")
+                            await message.channel.send("⚠️ An error occurred. Please contact an admin.",
+                                                       delete_after=10)
+                            return
+
+                        user_data = self.bot.user_points.setdefault(user_id, {"all_time_points": 0.0,
+                                                                              "available_points": 0.0})
+                        user_data["all_time_points"] += config.GM_MV_POINTS_REWARD
+                        user_data["available_points"] += config.GM_MV_POINTS_REWARD
+
+                        self.bot.admin_points["balance"] -= config.GM_MV_POINTS_REWARD
+                        self.bot.admin_points["in_circulation"] += config.GM_MV_POINTS_REWARD
+
+                    # Common logic for both admins and non-admins
+                    await self.bot.log_points_transaction(user_id, config.GM_MV_POINTS_REWARD, "GM points")
+                    self.bot.gm_log[user_id] = today
+
+                    embed = discord.Embed(
+                        title="🎉 GM/MV Points Awarded! 🎉",
+                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{config.GM_MV_POINTS_REWARD:.2f} points** for your GM/MV message.",
+                        color=discord.Color.gold()
+                    )
+                    embed.set_image(url="https://media.tenor.com/Fw5m_qY3S2gAAAAC/puffed-celebration.gif")
+                    embed.set_footer(
+                        text=f"Your new balance is {self.bot.user_points.get(user_id, {}).get('available_points', 0):.2f} points" if not is_author_admin else "Points have been added to your balance.")
+                    embed.timestamp = datetime.now(UTC)
+                    await message.channel.send(embed=embed, delete_after=20)
 
         # --- 4. XP and Moderation Logic (applies to ALL messages) ---
         # This logic should be placed at the end if it's meant to run for all messages.
@@ -2380,7 +2430,7 @@ class AdminCommands(commands.Cog):
 
         # Banned Words Check
         cleaned_content = message.content.lower().translate(str.maketrans('', '', string.punctuation))
-        if any(word in self.bot.banned_words for word in cleaned_content.split()):
+        if any(word in config.banned_words for word in cleaned_content.split()):
             await message.delete()
             await message.channel.send(f'🚫 {message.author.mention}, that message contains a banned word!',
                                        delete_after=20)

@@ -149,22 +149,21 @@ class MyBot(commands.Bot):
     # --- Event Handlers and Background Tasks ---
     async def setup_hook(self):
         """This runs before the bot connects to Discord."""
-        print("Starting the bot...")
+        logger.info("Starting the bot...")
         for extension in INITIAL_EXTENSIONS:
             try:
                 await self.load_extension(extension)
                 print(f"Loaded {extension}")
             except Exception as e:
                 print(f"Failed to load {extension}: {e}")
-        print("Cogs loaded. Bot is ready.")
-
+        logger.info("Cogs loaded. Bot is ready.")
 
     async def on_ready(self):
         """Event handler for when the bot has connected to Discord."""
-        print('--------------------------------')
-        print(f'Logged in as {self.user.name}')
-        print(f'Bot ID: {self.user.id}')
-        print('--------------------------------')
+        logger.info('--------------------------------')
+        logger.info(f'Logged in as {self.user.name}')
+        logger.info(f'Bot ID: {self.user.id}')
+        logger.info('--------------------------------')
 
         # Load invites from cache
         for guild in self.guilds:

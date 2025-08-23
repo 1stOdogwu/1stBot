@@ -1,122 +1,68 @@
 import discord
 from discord.ext import commands, tasks
-from datetime import datetime, UTC
-import random
-import string
-import asyncio
-
-from database import load_data, save_data
 from logger import bot_logger as logger
+from database import save_data, load_data
 import config
+from datetime import datetime, UTC
 
 class TasksCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.Cog.listener()
-    async def on_ready(self):
-        """Starts all the background tasks when the cog is ready."""
+    # This method runs automatically when the cog is loaded
+    def cog_load(self):
+        """Starts all background tasks when the cog is loaded."""
         logger.info("Starting background tasks...")
-        if not self.update_leaderboards.is_running():
-            self.update_leaderboards.start()
-        if not self.save_logs_periodically.is_running():
-            self.save_logs_periodically.start()
-        if not self.reset_vip_posts.is_running():
-            self.reset_vip_posts.start()
-        if not self.weekly_xp_bonus.is_running():
-            self.weekly_xp_bonus.start()
-        if not self.update_economy_message.is_running():
-            self.update_economy_message.start()
-        if not self.update_giveaway_winners_history.is_running():
-            self.update_giveaway_winners_history.start()
-        logger.info("All background tasks started.")
+        # ✅ We start the save task here
+        self.save_all_data_task.start()
+        # You can start other tasks here as well, e.g.,
+        # self.weekly_xp_bonus.start()
 
-    # G M  /  M V
-    @commands.Cog.listener()
-    async def on_message(self, message):
-        if message.author.bot:
-            return
+    # This method runs automatically when the cog is unloaded
+    def cog_unload(self):
+        """Cancels all background tasks when the cog is unloaded."""
+        logger.info("Cancelling background tasks...")
+        self.save_all_data_task.cancel()
+        # self.weekly_xp_bonus.cancel()
 
-        # Process only GM/MV points in the designated channel
-        if message.channel.id == config.GM_MV_CHANNEL_ID:
-            content = message.content.lower().strip()
-
-            # Check if the message is exactly "gm" or "mv"
-            if content == "gm" or content == "mv":
-                user_id = str(message.author.id)
-                today = str(datetime.now(UTC).date())
-
-                if self.bot.gm_log.get(user_id) != today:
-                    # Check if the author is an admin
-                    is_author_admin = any(role.id == config.ADMIN_ROLE_ID for role in message.author.roles)
-
-                    if is_author_admin:
-                        self.bot.admin_points["balance"] -= config.GM_MV_POINTS_REWARD
-                        self.bot.admin_points["my_points"] += config.GM_MV_POINTS_REWARD
-                        self.bot.admin_points["in_circulation"] += config.GM_MV_POINTS_REWARD
-
-                    else:
-                        if self.bot.admin_points["balance"] < config.GM_MV_POINTS_REWARD:
-                            logger.warning("⚠️ Admin balance is too low to award GM points. Skipping.")
-                            await message.channel.send("⚠️ An error occurred. Please contact an admin.",
-                                                       delete_after=10)
-                            return
-
-                        user_data = self.bot.user_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
-                        user_data["all_time_points"] += config.GM_MV_POINTS_REWARD
-                        user_data["available_points"] += config.GM_MV_POINTS_REWARD
-
-                        self.bot.admin_points["balance"] -= config.GM_MV_POINTS_REWARD
-                        self.bot.admin_points["in_circulation"] += config.GM_MV_POINTS_REWARD
-
-                    # Common logic for both admins and non-admins
-                    await self.bot.log_points_transaction(user_id, config.GM_MV_POINTS_REWARD, "GM points")
-                    self.bot.gm_log[user_id] = today
-
-                    embed = discord.Embed(
-                        title="🎉 GM/MV Points Awarded! 🎉",
-                        description=f"Congratulations, {message.author.mention}! You've been rewarded **{config.GM_MV_POINTS_REWARD:.2f} points** for your GM/MV message.",
-                        color=discord.Color.gold()
-                    )
-                    embed.set_image(url="https://media.tenor.com/Fw5m_qY3S2gAAAAC/puffed-celebration.gif")
-                    embed.set_footer(
-                        text=f"Your new balance is {self.bot.user_points.get(user_id, {}).get('available_points', 0):.2f} points" if not is_author_admin else "Points have been added to your balance.")
-                    embed.timestamp = datetime.now(UTC)
-                    await message.channel.send(embed=embed, delete_after=20)
-
-
-    #  P E R I O D I C A L      L O G S     /       D A T A       S A V I N G
-    @tasks.loop(seconds=15)
-    async def save_logs_periodically(self):
+    # The periodic task that saves all your data
+    @tasks.loop(seconds=5)
+    async def save_all_data_task(self):
+        """Periodically saves all bot data to the database."""
         await self.bot.wait_until_ready()
         logger.info("Starting periodic data save...")
-        await self.bot.save_all_data_to_db()
 
+        # This is the single, clean call to the helper function
+        await self._save_all_data_to_db()
+
+    # The helper function that does the actual saving
+    async def _save_all_data_to_db(self):
+        """Saves all bot data to the database."""
         try:
-            self.bot.save_data("points_history_table", self.bot.points_history)
-            self.bot.save_data("giveaway_logs_table", self.bot.giveaway_winners_log)
-            self.bot.save_data("all_time_giveaway_logs_table", self.bot.all_time_giveaway_logs)
-            self.bot.save_data("gm_log_table", self.bot.gm_log)
-            self.bot.save_data("user_points_table", self.bot.user_points)
-            self.bot.save_data("admin_points_table", self.bot.admin_points)
-            self.bot.save_data("submissions_table", self.bot.submissions)
-            self.bot.save_data("quest_submissions_table", self.bot.quest_submissions)
-            self.bot.save_data("weekly_quests_table", self.bot.weekly_quests)
-            self.bot.save_data("referral_data_table", self.bot.referral_data)
-            self.bot.save_data("approved_proofs_table", self.bot.approved_proofs)
-            self.bot.save_data("user_xp_table", self.bot.user_xp)
-            self.bot.save_data("bot_data_table", self.bot.bot_data)
-            self.bot.save_data("vip_posts_table", self.bot.vip_posts)
-            self.bot.save_data("pending_referrals_table", self.bot.pending_referrals)
-            self.bot.save_data("active_tickets_table", self.bot.active_tickets)
-            self.bot.save_data("mysterybox_uses_table", self.bot.mysterybox_uses)
-            self.bot.save_data("processed_reactions_table", list(self.bot.processed_reactions))
-            self.bot.save_data("referred_users_table", list(self.bot.referred_users))
+            await self.bot.save_data("points_history_table", self.bot.points_history)
+            await self.bot.save_data("giveaway_logs_table", self.bot.giveaway_winners_log)
+            await self.bot.save_data("all_time_giveaway_logs_table", self.bot.all_time_giveaway_winners_log)
+            await self.bot.save_data("gm_log_table", self.bot.gm_log)
+            await self.bot.save_data("user_points_table", self.bot.user_points)
+            await self.bot.save_data("admin_points_table", self.bot.admin_points)
+            await self.bot.save_data("submissions_table", self.bot.submissions)
+            await self.bot.save_data("quest_submissions_table", self.bot.quest_submissions)
+            await self.bot.save_data("weekly_quests_table", self.bot.weekly_quests)
+            await self.bot.save_data("referral_data_table", self.bot.referral_data)
+            await self.bot.save_data("approved_proofs_table", self.bot.approved_proofs)
+            await self.bot.save_data("user_xp_table", self.bot.user_xp)
+            await self.bot.save_data("bot_data_table", self.bot.bot_data)
+            await self.bot.save_data("vip_posts_table", self.bot.vip_posts)
+            await self.bot.save_data("pending_referrals_table", self.bot.pending_referrals)
+            await self.bot.save_data("active_tickets_table", self.bot.active_tickets)
+            await self.bot.save_data("mysterybox_uses_table", self.bot.mysterybox_uses)
+            await self.bot.save_data("processed_reactions_table", list(self.bot.processed_reactions))
+            await self.bot.save_data("referred_users_table", list(self.bot.referred_users))
 
             logger.info("✅ All bot data saved successfully.")
-
         except Exception as e:
             logger.error(f"❌ An error occurred during the periodic save task: {e}")
+
 
     #  T H E      E C O N O M Y      M E S S A G E       L O O P
     @tasks.loop(minutes=5)
@@ -273,7 +219,7 @@ class TasksCog(commands.Cog):
         self.bot.save_data("user_points_table", self.bot.user_points)
         self.bot.save_data("admin_points_table", self.bot.admin_points)
 
-        reward_channel = self.bot.get_channel(self.bot.XP_REWARD_CHANNEL_ID)
+        reward_channel = self.bot.get_channel(config.XP_REWARD_CHANNEL_ID)
         if reward_channel:
             mentions = []
             for uid, _ in top_users:
@@ -314,9 +260,9 @@ class TasksCog(commands.Cog):
                 await reward_channel.send(embed=embed)
             except discord.Forbidden:
                 logger.error(
-                    f"Bot missing permissions to send message to XP reward channel ({self.bot.XP_REWARD_CHANNEL_ID}).")
+                    f"Bot missing permissions to send message to XP reward channel ({config.XP_REWARD_CHANNEL_ID}).")
         else:
-            logger.error(f"XP Reward Channel (ID: {self.bot.XP_REWARD_CHANNEL_ID}) not found.")
+            logger.error(f"XP Reward Channel (ID: {config.XP_REWARD_CHANNEL_ID}) not found.")
 
         logger.info("Weekly XP bonus awarded.")
 
@@ -332,9 +278,9 @@ class TasksCog(commands.Cog):
             logger.info("No new giveaway winners to update. Skipping.")
             return
 
-        channel = self.bot.get_channel(self.bot.GIVEAWAY_CHANNEL_ID)
+        channel = self.bot.get_channel(config.GIVEAWAY_CHANNEL_ID)
         if not channel:
-            logger.error(f"❌ Error: Giveaway channel with ID {self.bot.GIVEAWAY_CHANNEL_ID} not found.")
+            logger.error(f"❌ Error: Giveaway channel with ID {config.GIVEAWAY_CHANNEL_ID} not found.")
             return
 
         embed = discord.Embed(
