@@ -36,7 +36,7 @@ class TasksCog(commands.Cog):
         self.reset_vip_posts.cancel()
 
     # --- S A V E      L O G S       L O O P ---
-    @tasks.loop(seconds=5)
+    @tasks.loop(seconds=15)
     async def save_all_data_task(self):
         """Periodically saves all bot data to the database."""
         await self.bot.wait_until_ready()
@@ -113,7 +113,7 @@ class TasksCog(commands.Cog):
             logger.error(f"❌ An unexpected error occurred in the economy update task: {e}", exc_info=True)
 
     # --- A L L      L E A D E R B O A R D      M E S S A G E       L O O P ---
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=5)
     async def update_leaderboards(self):
         """Periodically updates the three leaderboard messages."""
         await self.bot.wait_until_ready()
@@ -130,6 +130,7 @@ class TasksCog(commands.Cog):
                 return
 
             await self.bot.manage_periodic_message(
+                bot=self.bot,
                 channel=channel,
                 bot_data=self.bot.bot_data,
                 message_id_key="points_leaderboard_message_id",
@@ -137,6 +138,7 @@ class TasksCog(commands.Cog):
                 pin=True
             )
             await self.bot.manage_periodic_message(
+                bot=self.bot,
                 channel=channel,
                 bot_data=self.bot.bot_data,
                 message_id_key="referral_leaderboard_message_id",
@@ -144,6 +146,7 @@ class TasksCog(commands.Cog):
                 pin=True
             )
             await self.bot.manage_periodic_message(
+                bot=self.bot,
                 channel=channel,
                 bot_data=self.bot.bot_data,
                 message_id_key="xp_leaderboard_message_id",

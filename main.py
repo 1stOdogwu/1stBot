@@ -120,7 +120,6 @@ class MyBot(commands.Bot):
             logger.error(f"❌ An error occurred while saving all data: {e}", exc_info=True)
 
 
-
     # --- Helper Functions (Correctly placed here) ---
     def ensure_user(self, user_id: str):
         """Ensures a user has an entry in the user_points dictionary."""

@@ -2369,6 +2369,7 @@ class AdminCommands(commands.Cog):
                         self.bot.admin_points["balance"] -= config.GM_MV_POINTS_REWARD
                         self.bot.admin_points["my_points"] += config.GM_MV_POINTS_REWARD
                         self.bot.admin_points["in_circulation"] += config.GM_MV_POINTS_REWARD
+                        await self.bot.save_data("admin_points_table", self.bot.admin_points)
 
                     else:
                         if self.bot.admin_points["balance"] < config.GM_MV_POINTS_REWARD:
@@ -2381,9 +2382,11 @@ class AdminCommands(commands.Cog):
                                                                               "available_points": 0.0})
                         user_data["all_time_points"] += config.GM_MV_POINTS_REWARD
                         user_data["available_points"] += config.GM_MV_POINTS_REWARD
+                        await self.bot.save_data("points_history_table", self.bot.points_history)
 
                         self.bot.admin_points["balance"] -= config.GM_MV_POINTS_REWARD
                         self.bot.admin_points["in_circulation"] += config.GM_MV_POINTS_REWARD
+                        await self.bot.save_data("admin_points_table", self.bot.admin_points)
 
                     # Common logic for both admins and non-admins
                     await self.bot.log_points_transaction(user_id, config.GM_MV_POINTS_REWARD, "GM points")
