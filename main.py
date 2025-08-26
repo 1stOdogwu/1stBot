@@ -5,9 +5,10 @@ from datetime import datetime, UTC
 import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor  # <-- ADDED THIS LINE
 
 # Local application imports
-from database import load_data, save_data
+from database import init_db, save_data as db_save_data, load_data as db_load_data
 from logger import bot_logger as logger
 import config
 
@@ -20,9 +21,6 @@ if not TOKEN:
     logger.error("Error: DISCORD_TOKEN not found in environment variables. Please check your .env file.")
     exit()
 
-# Define the cogs you want to load
-# This list must include all files in your 'cogs' directory
-# that you want to be loaded as extensions.
 INITIAL_EXTENSIONS = [
     'cogs.admin',
     'cogs.tasks'
@@ -31,7 +29,6 @@ INITIAL_EXTENSIONS = [
 
 class MyBot(commands.Bot):
     def __init__(self):
-        # Set intents and command prefix
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
@@ -44,19 +41,54 @@ class MyBot(commands.Bot):
             case_insensitive=True
         )
 
-        # --- Attach Configuration and Data to the Bot Object ---
-        self.config = config
-        self.save_data = save_data
+        # We'll use this db_executor for all database operations
+        # It's defined here and passed to our database functions
+        self.db_executor = ThreadPoolExecutor()
 
-        # Load files that are DICTIONARIES
-        self.user_points = load_data("user_points_table", {})
-        self.submissions = load_data("submissions_table", {})
-        self.vip_posts = load_data("vip_posts_table", {})
-        self.user_xp = load_data("user_xp_table", {})
-        self.weekly_quests = load_data("weekly_quests_table", {"week": 0, "quests": []})
-        self.quest_submissions = load_data("quest_submissions_table", {})
-        self.gm_log = load_data("gm_log_table", {})
-        self.admin_points = load_data("admin_points_table", {
+        # The new, non-blocking database functions are assigned to the bot instance
+        self.init_db = init_db
+        self.load_data = db_load_data
+        self.save_data = db_save_data
+
+        # Initialize these as empty until we can load them in an async function
+        self.user_points = {}
+        self.submissions = {}
+        self.vip_posts = {}
+        self.user_xp = {}
+        self.weekly_quests = {}
+        self.quest_submissions = {}
+        self.gm_log = {}
+        self.admin_points = {}
+        self.referral_data = {}
+        self.pending_referrals = {}
+        self.active_tickets = {}
+        self.mysterybox_uses = {}
+        self.bot_data = {}
+        self.approved_proofs = []
+        self.points_history = []
+        self.giveaway_winners_log = []
+        self.all_time_giveaway_winners_log = []
+        self.referred_users = set()
+        self.processed_reactions = set()
+
+        self.invite_cache = {}
+        self.invites_before_join = {}
+        self.ticket_messages_to_archive = {}
+
+    # --- THIS FUNCTION NOW HANDLES ALL DATA LOADING ---
+    async def load_all_data_from_db(self):
+        """
+        Loads all bot data from the database.
+        This must be called in an async context, like on_ready.
+        """
+        self.user_points = await self.load_data(self, "user_points_table", {})
+        self.submissions = await self.load_data(self, "submissions_table", {})
+        self.vip_posts = await self.load_data(self, "vip_posts_table", {})
+        self.user_xp = await self.load_data(self, "user_xp_table", {})
+        self.weekly_quests = await self.load_data(self, "weekly_quests_table", {"week": 0, "quests": []})
+        self.quest_submissions = await self.load_data(self, "quest_submissions_table", {})
+        self.gm_log = await self.load_data(self, "gm_log_table", {})
+        self.admin_points = await self.load_data(self, "admin_points_table", {
             "total_supply": 10000000000.0,
             "balance": 10000000000.0,
             "in_circulation": 0.0,
@@ -64,26 +96,19 @@ class MyBot(commands.Bot):
             "my_points": 0.0,
             "treasury": 0.0
         })
-        self.referral_data = load_data("referral_data_table", {})
-        self.pending_referrals = load_data("pending_referrals_table", {})
-        self.active_tickets = load_data("active_tickets_table", {})
-        self.mysterybox_uses = load_data("mysterybox_uses_table", {})
-        self.bot_data = load_data("bot_data_table", {})
+        self.referral_data = await self.load_data(self, "referral_data_table", {})
+        self.pending_referrals = await self.load_data(self, "pending_referrals_table", {})
+        self.active_tickets = await self.load_data(self, "active_tickets_table", {})
+        self.mysterybox_uses = await self.load_data(self, "mysterybox_uses_table", {})
+        self.bot_data = await self.load_data(self, "bot_data_table", {})
+        self.approved_proofs = await self.load_data(self, "approved_proofs_table", [])
+        self.points_history = await self.load_data(self, "points_history_table", [])
+        self.giveaway_winners_log = await self.load_data(self, "giveaway_logs_table", [])
+        self.all_time_giveaway_winners_log = await self.load_data(self, "all_time_giveaway_logs_table", [])
+        self.referred_users = set(await self.load_data(self, "referred_users_table", []))
+        self.processed_reactions = set(await self.load_data(self, "processed_reactions_table", []))
 
-        # Load files that are LISTS
-        self.approved_proofs = load_data("approved_proofs_table", [])
-        self.points_history = load_data("points_history_table", [])
-        self.giveaway_winners_log = load_data("giveaway_logs_table", [])
-        self.all_time_giveaway_winners_log = load_data("all_time_giveaway_logs_table", [])
-
-        # Load files that are SETS
-        self.referred_users = set(load_data("referred_users_table", []))
-        self.processed_reactions = set(load_data("processed_reactions_table", []))
-
-        # --- Global Bot State Variables ---
-        self.invite_cache = {}
-        self.invites_before_join = {}
-        self.ticket_messages_to_archive = {}
+        logger.info("✅ All bot data loaded from the database.")
 
     async def save_all_data_to_db(self):
         """
@@ -91,46 +116,40 @@ class MyBot(commands.Bot):
         This is a helper function to be called by the periodic task or commands.
         """
         try:
-            # ✅ Use the correct method call: self.save_data(...)
-            await self.save_data("points_history_table", self.points_history)
-            await self.save_data("giveaway_logs_table", self.giveaway_winners_log)
-            await self.save_data("all_time_giveaway_logs_table", self.all_time_giveaway_winners_log)
-            await self.save_data("gm_log_table", self.gm_log)
-            await self.save_data("user_points_table", self.user_points)
-            await self.save_data("admin_points_table", self.admin_points)
-            await self.save_data("submissions_table", self.submissions)
-            await self.save_data("quest_submissions_table", self.quest_submissions)
-            await self.save_data("weekly_quests_table", self.weekly_quests)
-            await self.save_data("referral_data_table", self.referral_data)
-            await self.save_data("approved_proofs_table", self.approved_proofs)
-            await self.save_data("user_xp_table", self.user_xp)
-            await self.save_data("bot_data_table", self.bot_data)
-            await self.save_data("vip_posts_table", self.vip_posts)
-            await self.save_data("pending_referrals_table", self.pending_referrals)
-            await self.save_data("active_tickets_table", self.active_tickets)
-            await self.save_data("mysterybox_uses_table", self.mysterybox_uses)
+            await self.save_data(self, "points_history_table", self.points_history)
+            await self.save_data(self, "giveaway_logs_table", self.giveaway_winners_log)
+            await self.save_data(self, "all_time_giveaway_logs_table", self.all_time_giveaway_winners_log)
+            await self.save_data(self, "gm_log_table", self.gm_log)
+            await self.save_data(self, "user_points_table", self.user_points)
+            await self.save_data(self, "admin_points_table", self.admin_points)
+            await self.save_data(self, "submissions_table", self.submissions)
+            await self.save_data(self, "quest_submissions_table", self.quest_submissions)
+            await self.save_data(self, "weekly_quests_table", self.weekly_quests)
+            await self.save_data(self, "referral_data_table", self.referral_data)
+            await self.save_data(self, "approved_proofs_table", self.approved_proofs)
+            await self.save_data(self, "user_xp_table", self.user_xp)
+            await self.save_data(self, "bot_data_table", self.bot_data)
+            await self.save_data(self, "vip_posts_table", self.vip_posts)
+            await self.save_data(self, "pending_referrals_table", self.pending_referrals)
+            await self.save_data(self, "active_tickets_table", self.active_tickets)
+            await self.save_data(self, "mysterybox_uses_table", self.mysterybox_uses)
 
-            # We need to convert sets to lists before saving them
-            await self.save_data("processed_reactions_table", list(self.processed_reactions))
-            await self.save_data("referred_users_table", list(self.referred_users))
+            await self.save_data(self, "processed_reactions_table", list(self.processed_reactions))
+            await self.save_data(self, "referred_users_table", list(self.referred_users))
 
             logger.info("✅ All bot data saved to the database.")
 
         except Exception as e:
             logger.error(f"❌ An error occurred while saving all data: {e}", exc_info=True)
 
-
-    # --- Helper Functions (Correctly placed here) ---
+    # --- Helper Functions (these are now local and don't need 'self.bot' passed) ---
     def ensure_user(self, user_id: str):
-        """Ensures a user has an entry in the user_points dictionary."""
         self.user_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
 
     def get_user_balance(self, user_id: str) -> float:
-        """Safely retrieves a user's available points."""
         return self.user_points.get(user_id, {}).get("available_points", 0.0)
 
     def admin_can_issue(self, amount: float) -> bool:
-        """Checks if the admin has enough points to issue."""
         return self.admin_points["balance"] >= amount
 
     def mb_get_uses_in_last_24h(self, user_id: str) -> int:
@@ -164,7 +183,14 @@ class MyBot(commands.Bot):
         logger.info(f'Bot ID: {self.user.id}')
         logger.info('--------------------------------')
 
-        # Load invites from cache
+        # ✅ STEP 1: Initialize the database tables. Only needed once.
+        await self.init_db(self)
+
+        # ✅ STEP 2: Load all the data from the database.
+        await self.load_all_data_from_db()
+
+        # Now your bot state is correct and ready to be used.
+        # ... rest of your on_ready code
         for guild in self.guilds:
             try:
                 self.invite_cache[guild.id] = await guild.invites()
@@ -172,7 +198,6 @@ class MyBot(commands.Bot):
                 pass
 
     async def manage_periodic_message(self, channel, bot_data, message_id_key, embed, pin=False):
-        """Fetches, edits, or creates a periodic message, and saves its ID."""
         try:
             message_id = bot_data.get(message_id_key)
 
@@ -183,7 +208,7 @@ class MyBot(commands.Bot):
                 except discord.NotFound:
                     new_message = await channel.send(embed=embed)
                     bot_data[message_id_key] = new_message.id
-                    self.save_data("bot_data_table", bot_data)
+                    await self.save_data(self, "bot_data_table", bot_data)
                     if pin:
                         await new_message.pin()
                 except discord.Forbidden:
@@ -191,7 +216,7 @@ class MyBot(commands.Bot):
             else:
                 new_message = await channel.send(embed=embed)
                 bot_data[message_id_key] = new_message.id
-                self.save_data("bot_data_table", bot_data)
+                await self.save_data(self, "bot_data_table", bot_data)
                 if pin:
                     await new_message.pin()
 
@@ -200,17 +225,13 @@ class MyBot(commands.Bot):
         except Exception as e:
             logger.error(f"An unexpected error occurred in manage_periodic_message: {e}")
 
-
-# P O I N T S     T R A N S A C T I O N      L O G
+    # P O I N T S     T R A N S A C T I O N      L O G
     async def log_points_transaction(self, user_id, points, purpose):
-        """Adds a new entry to the points' history log and updates the channel message."""
         try:
-            # Access the user object
             user = self.get_user(int(user_id))
             user_mention = user.mention if user else "Unknown User"
             user_name = user.display_name if user else "Unknown User"
 
-            # 1. Log the transaction to the internal history list
             new_entry = {
                 "user_id": str(user_id),
                 "points": points,
@@ -219,7 +240,6 @@ class MyBot(commands.Bot):
             }
             self.points_history.append(new_entry)
 
-            # 2. Prepare the embed for the public log channel
             if points > 0:
                 title = "🎉 Points Credited"
                 color = discord.Color.green()
@@ -243,7 +263,6 @@ class MyBot(commands.Bot):
             else:
                 logger.error(f"Points history channel (ID: {config.POINTS_HISTORY_CHANNEL_ID}) not found.")
 
-            # 3. Handle the burn log specifically
             if "(burn)" in purpose.lower():
                 burns_channel = self.get_channel(config.BURNS_LOG_CHANNEL_ID)
                 if burns_channel:
