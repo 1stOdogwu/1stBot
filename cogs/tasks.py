@@ -68,7 +68,7 @@ class TasksCog(commands.Cog):
                 logger.info("✅ New economy message sent and its ID saved.")
 
             # ✅ Await the save_data call
-            await self.bot.save_data("bot_data_table", self.bot.bot_data)
+            await self.bot.save_data("bot_data", self.bot.bot_data)
         except discord.Forbidden:
             logger.error(f"❌ Bot missing permissions to send messages in channel ({config.FIRST_ODOGWU_CHANNEL_ID}).")
         except Exception as e:
@@ -91,6 +91,9 @@ class TasksCog(commands.Cog):
                     f"❌ Error: Leaderboard channel not found (ID: {config.PERIODIC_LEADERBOARD_CHANNEL_ID}).")
                 return
 
+            # Load the latest bot_data from the database before performing any operations
+            self.bot.bot_data = await self.bot.load_data(self.bot, "bot_data_table", {})
+
             await self.bot.manage_periodic_message(
                 channel=channel,
                 bot_data=self.bot.bot_data,
@@ -112,7 +115,9 @@ class TasksCog(commands.Cog):
                 embed=await commands_cog.get_xp_leaderboard_embed(),
                 pin=True
             )
-            await self.bot.save_data("bot_data_table", self.bot.bot_data)
+
+            # ✅ FIX: Use the consistent database key "bot_data_table"
+            await self.bot.save_data(self.bot, "bot_data_table", self.bot.bot_data)
             logger.info("✅ All leaderboards updated successfully.")
         except discord.Forbidden:
             logger.error("Bot is missing permissions to send, edit, or pin messages in the leaderboard channel.")
@@ -131,9 +136,9 @@ class TasksCog(commands.Cog):
             return
 
         # ✅ FIX: Load the user points and XP data from the database
-        user_points = await self.bot.load_data(self.bot, "user_points_table", {})
-        user_xp = await self.bot.load_data(self.bot, "user_xp_table", {})
-        admin_points = await self.bot.load_data(self.bot, "admin_points_table", {})
+        users_points = await self.bot.load_data(self.bot, "users_points", {})
+        user_xp = await self.bot.load_data(self.bot, "user_xp", {})
+        admin_points = await self.bot.load_data(self.bot, "admin_points", {})
 
         eligible = {}
         allowed_roles = [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID]
@@ -165,18 +170,18 @@ class TasksCog(commands.Cog):
 
         for uid, _ in top_users:
             user_id = str(uid)
-            # ✅ FIX: Modify the loaded user_points dictionary
-            user_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
-            user_points[user_id]["all_time_points"] += points_to_award_per_user
-            user_points[user_id]["available_points"] += points_to_award_per_user
+            # ✅ FIX: Modify the loaded users_points dictionary
+            users_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
+            users_points[user_id]["all_time_points"] += points_to_award_per_user
+            users_points[user_id]["available_points"] += points_to_award_per_user
             await commands_cog.log_points_transaction(user_id, float(points_to_award_per_user), "Weekly XP bonus")
 
         # ✅ FIX: Modify the loaded admin_points and save all data
         admin_points["balance"] -= total_points_to_award
         admin_points["in_circulation"] += total_points_to_award
 
-        await self.bot.save_data(self.bot, "user_points_table", user_points)
-        await self.bot.save_data(self.bot, "admin_points_table", admin_points)
+        await self.bot.save_data(self.bot, "users_points", users_points)
+        await self.bot.save_data(self.bot, "admin_points", admin_points)
 
         reward_channel = self.bot.get_channel(config.XP_REWARD_CHANNEL_ID)
         if reward_channel:
@@ -228,8 +233,8 @@ class TasksCog(commands.Cog):
         await self.bot.wait_until_ready()
 
         # ✅ FIX: Load both giveaway logs from the database
-        giveaway_winners_log = await self.bot.load_data(self.bot, "giveaway_logs_table", [])
-        all_time_giveaway_winners_log = await self.bot.load_data(self.bot, "all_time_giveaway_logs_table", [])
+        giveaway_winners_log = await self.bot.load_data(self.bot, "giveaway_logs", [])
+        all_time_giveaway_winners_log = await self.bot.load_data(self.bot, "all_time_giveaway_logs", [])
 
         if not giveaway_winners_log:
             logger.info("No new giveaway winners to update. Skipping.")
@@ -271,9 +276,9 @@ class TasksCog(commands.Cog):
 
         # ✅ FIX: Clear the weekly log and save both to the database
         giveaway_winners_log.clear()
-        await self.bot.save_data(self.bot, "giveaway_logs_table", giveaway_winners_log)
-        await self.bot.save_data(self.bot, "all_time_giveaway_logs_table", all_time_giveaway_winners_log)
-        await self.bot.save_data(self.bot, "bot_data_table", self.bot.bot_data)
+        await self.bot.save_data(self.bot, "giveaway_logs", giveaway_winners_log)
+        await self.bot.save_data(self.bot, "all_time_giveaway_logs", all_time_giveaway_winners_log)
+        await self.bot.save_data(self.bot, "bot_data", self.bot.bot_data)
         logger.info("✅ Giveaway history updated and temporary log cleared.")
 
     # --- V I P      P O S T      R E S E T       L O O P ---
@@ -282,10 +287,8 @@ class TasksCog(commands.Cog):
         """Resets the daily VIP post-limit."""
         await self.bot.wait_until_ready()
         try:
-            # ✅ FIX: Load the vip_posts data first
-            vip_posts = await self.bot.load_data(self.bot, "vip_posts_table", {})
             vip_posts = {}
-            await self.bot.save_data(self.bot, "vip_posts_table", vip_posts)
+            await self.bot.save_data(self.bot, "vip_posts", vip_posts)
             logger.info("🔄 VIP post limit reset.")
         except Exception as e:
             logger.error(f"❌ An error occurred during the VIP post reset task: {e}")

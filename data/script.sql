@@ -1,191 +1,259 @@
-create table if not exists user_points_table
+create table if not exists user_xp
 (
-    id   integer not null
+    user_id varchar(50) not null
         primary key,
-    data jsonb
+    xp      bigint default 0
 );
 
-alter table user_points_table
+alter table user_xp
     owner to postgres;
 
-create table if not exists submissions_table
+create table if not exists weekly_quests
 (
-    id   integer not null
+    week   integer not null
         primary key,
-    data jsonb
+    quests jsonb
 );
 
-alter table submissions_table
+alter table weekly_quests
     owner to postgres;
 
-create table if not exists logs_table
+create table if not exists quest_submissions
 (
-    id   integer not null
+    id           serial
         primary key,
-    data jsonb
+    user_id      varchar(50),
+    quest_number integer,
+    proof_link   text,
+    status       varchar(20) default 'pending'::character varying
 );
 
-alter table logs_table
+alter table quest_submissions
     owner to postgres;
 
-create table if not exists vip_posts_table
+create table if not exists admin_points
 (
-    id   integer not null
+    id             serial
         primary key,
-    data jsonb
+    total_supply   double precision default '10000000000'::bigint,
+    balance        double precision default '10000000000'::bigint,
+    in_circulation double precision default 0,
+    burned         double precision default 0,
+    my_points      double precision default 0,
+    treasury       double precision default 0
 );
 
-alter table vip_posts_table
+alter table admin_points
     owner to postgres;
 
-create table if not exists user_xp_table
+create table if not exists points_history
 (
-    id   integer not null
+    id        serial
         primary key,
-    data jsonb
+    user_id   varchar(50),
+    points    double precision,
+    purpose   text,
+    timestamp timestamp with time zone default now()
 );
 
-alter table user_xp_table
+alter table points_history
     owner to postgres;
 
-create table if not exists weekly_quests_table
+create table if not exists giveaway_winners
 (
-    id   integer not null
+    id        serial
         primary key,
-    data jsonb
+    user_id   varchar(50),
+    points    double precision,
+    purpose   text,
+    timestamp timestamp with time zone default now()
 );
 
-alter table weekly_quests_table
+alter table giveaway_winners
     owner to postgres;
 
-create table if not exists quest_submissions_table
+create table if not exists referrals
 (
-    id   integer not null
+    referred_id varchar(50) not null
         primary key,
-    data jsonb
+    referrer_id varchar(50),
+    status      varchar(20) default 'pending'::character varying
 );
 
-alter table quest_submissions_table
+alter table referrals
     owner to postgres;
 
-create table if not exists gm_log_table
+create table if not exists mysterybox_uses
 (
-    id   integer not null
+    id        serial
         primary key,
-    data jsonb
+    user_id   varchar(50),
+    timestamp timestamp with time zone default now()
 );
 
-alter table gm_log_table
+alter table mysterybox_uses
     owner to postgres;
 
-create table if not exists admin_points_table
+create table if not exists users_points
 (
-    id   integer not null
+    user_id          bigint                                 not null
         primary key,
-    data jsonb
+    all_time_points  double precision         default 0     not null,
+    available_points double precision         default 0     not null,
+    xp               bigint                   default 0     not null,
+    created_at       timestamp with time zone default now() not null,
+    updated_at       timestamp with time zone default now() not null
 );
 
-alter table admin_points_table
+alter table users_points
     owner to postgres;
 
-create table if not exists referral_data_table
+create table if not exists submissions
 (
-    id   integer not null
+    id          bigserial
         primary key,
-    data jsonb
+    user_id     bigint                                 not null,
+    proof_link  text                                   not null,
+    engagements text[],
+    status      text                                   not null,
+    reward_pts  double precision         default 0     not null,
+    ts          timestamp with time zone default now() not null
 );
 
-alter table referral_data_table
+alter table submissions
     owner to postgres;
 
-create table if not exists pending_referrals_table
+create table if not exists vip_posts
 (
-    id   integer not null
+    id        bigserial
         primary key,
-    data jsonb
+    user_id   bigint                                        not null,
+    post_link text                                          not null,
+    post_date date                     default CURRENT_DATE not null,
+    ts        timestamp with time zone default now()        not null
 );
 
-alter table pending_referrals_table
+alter table vip_posts
     owner to postgres;
 
-create table if not exists active_tickets_table
+create table if not exists gm_log
 (
-    id   integer not null
+    id      bigserial
         primary key,
-    data jsonb
+    user_id bigint                                 not null,
+    message text                                   not null,
+    ts      timestamp with time zone default now() not null
 );
 
-alter table active_tickets_table
+alter table gm_log
     owner to postgres;
 
-create table if not exists mysterybox_uses_table
+create table if not exists giveaway_logs
 (
-    id   integer not null
+    id      bigserial
         primary key,
-    data jsonb
+    user_id bigint                                 not null,
+    points  double precision                       not null,
+    purpose text                                   not null,
+    ts      timestamp with time zone default now() not null
 );
 
-alter table mysterybox_uses_table
+alter table giveaway_logs
     owner to postgres;
 
-create table if not exists approved_proofs_table
+create table if not exists all_time_giveaway_logs
 (
-    id   integer not null
+    id      bigserial
         primary key,
-    data jsonb
+    user_id bigint                                 not null,
+    points  double precision                       not null,
+    purpose text                                   not null,
+    ts      timestamp with time zone default now() not null
 );
 
-alter table approved_proofs_table
+alter table all_time_giveaway_logs
     owner to postgres;
 
-create table if not exists points_history_table
+create table if not exists referral_data
 (
-    id   integer not null
+    user_id     bigint                                 not null
         primary key,
-    data jsonb
+    referrer_id bigint                                 not null,
+    status      text                                   not null,
+    joined_at   timestamp with time zone default now() not null,
+    updated_at  timestamp with time zone default now() not null
 );
 
-alter table points_history_table
+alter table referral_data
     owner to postgres;
 
-create table if not exists giveaway_logs_table
+create table if not exists pending_referrals
 (
-    id   integer not null
+    user_id     bigint                                 not null
         primary key,
-    data jsonb
+    referrer_id bigint                                 not null,
+    joined_at   timestamp with time zone default now() not null
 );
 
-alter table giveaway_logs_table
+alter table pending_referrals
     owner to postgres;
 
-create table if not exists all_time_giveaway_logs_table
+create table if not exists active_tickets
 (
-    id   integer not null
+    ticket_id  bigserial
         primary key,
-    data jsonb
+    user_id    bigint                                 not null,
+    channel_id bigint                                 not null,
+    opened_at  timestamp with time zone default now() not null,
+    closed_at  timestamp with time zone
 );
 
-alter table all_time_giveaway_logs_table
+alter table active_tickets
     owner to postgres;
 
-create table if not exists referred_users_table
+create table if not exists bot_data
 (
-    id   integer not null
+    key   text  not null
         primary key,
-    data jsonb
+    value jsonb not null
 );
 
-alter table referred_users_table
+alter table bot_data
     owner to postgres;
 
-create table if not exists processed_reactions_table
+create table if not exists processed_reactions
 (
-    id   integer not null
-        primary key,
-    data jsonb
+    message_id bigint not null
+        primary key
 );
 
-alter table processed_reactions_table
+alter table processed_reactions
     owner to postgres;
 
+create table if not exists referred_users
+(
+    user_id bigint not null
+        primary key
+);
 
+alter table referred_users
+    owner to postgres;
+
+create table if not exists user_points
+(
+    user_id          integer,
+    all_time_points  integer,
+    available_points integer
+);
+
+alter table user_points
+    owner to postgres;
+
+create table if not exists approved_proofs
+(
+    normalized_url TEXT PRIMARY KEY,
+    created_at timestamptz not null default now()
+);
+
+alter table approved_proofs
+    owner to postgres;

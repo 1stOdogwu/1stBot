@@ -3,93 +3,169 @@ import json
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
-from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, UTC
 
-# Optional: your own logger
 try:
     from logger import bot_logger as logger
 except ImportError:
     import logging
+
     logger = logging.getLogger("bot")
     logging.basicConfig(level=logging.INFO)
 
-# --- Global Executor for Database Operations ---
-# We use a ThreadPoolExecutor to run blocking database calls
 executor = ThreadPoolExecutor()
 
-UTC = timezone.utc
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 
-# ------------------------------------------------
-# 🔄 SYNCHRONOUS WORKER FUNCTIONS (for the executor)
-# These functions MUST NOT use 'await'
-# ------------------------------------------------
 def _get_db_connection():
-    """Establishes and returns a database connection (synchronous)."""
     if not DATABASE_URL:
-        logger.error("❌ DATABASE_URL is not set in environment.")
+        logger.error("❌ DATABASE_URL is not set.")
         return None
     try:
-        # Using RealDictCursor for fetches
         return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     except Exception as e:
         logger.error(f"❌ Database connection failed: {e}")
         return None
 
+
 def _init_db_sync():
-    """Create all tables used by the generic store."""
     conn = _get_db_connection()
-    if not conn:
-        return
+    if not conn: return
     try:
         cur = conn.cursor()
-
-        # Generic KV store for your old JSON "files"
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS kv_store (
-                key TEXT PRIMARY KEY,
-                value JSONB NOT NULL,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
-
-        # Points transaction log
+                    CREATE TABLE IF NOT EXISTS bot_data
+                    (
+                        key  TEXT PRIMARY KEY,
+                        data JSONB
+                    );
+                    """)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS transactions (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                amount NUMERIC NOT NULL,
-                purpose TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
-
-        # Approved proofs (to prevent duplicates)
+                    CREATE TABLE IF NOT EXISTS admin_points
+                    (
+                        key  TEXT PRIMARY KEY,
+                        data JSONB
+                    );
+                    """)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS approved_proofs (
-                normalized_url TEXT PRIMARY KEY,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
-
-        # Processed reactions (idempotency)
+                    CREATE TABLE IF NOT EXISTS weekly_quests
+                    (
+                        key  TEXT PRIMARY KEY,
+                        data JSONB
+                    );
+                    """)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS processed_reactions (
-                reaction_identifier TEXT PRIMARY KEY,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
-
-        # Mysterybox uses (for 24h limit checks)
+                    CREATE TABLE IF NOT EXISTS user_points
+                    (
+                        user_id TEXT PRIMARY KEY,
+                        data    JSONB
+                    );
+                    """)
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS mysterybox_uses (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-        """)
+                    CREATE TABLE IF NOT EXISTS user_xp
+                    (
+                        user_id TEXT PRIMARY KEY,
+                        data    JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS referral_data
+                    (
+                        user_id TEXT PRIMARY KEY,
+                        data    JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS pending_referrals
+                    (
+                        user_id TEXT PRIMARY KEY,
+                        data    JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS gm_log
+                    (
+                        user_id TEXT PRIMARY KEY,
+                        data    JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS quest_submissions
+                    (
+                        user_id TEXT PRIMARY KEY,
+                        data    JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS submissions
+                    (
+                        user_id TEXT PRIMARY KEY,
+                        data    JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS vip_posts
+                    (
+                        key  TEXT PRIMARY KEY,
+                        data JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS active_tickets
+                    (
+                        channel_id TEXT PRIMARY KEY,
+                        user_id    TEXT NOT NULL
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS all_time_giveaway_logs
+                    (
+                        id   BIGSERIAL PRIMARY KEY,
+                        data JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS giveaway_logs
+                    (
+                        id   BIGSERIAL PRIMARY KEY,
+                        data JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS points_history
+                    (
+                        id   BIGSERIAL PRIMARY KEY,
+                        data JSONB
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS approved_proofs
+                    (
+                        normalized_url TEXT PRIMARY KEY
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS processed_reactions
+                    (
+                        reaction_identifier TEXT PRIMARY KEY
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS mysterybox_uses
+                    (
+                        id      BIGSERIAL PRIMARY KEY,
+                        user_id TEXT        NOT NULL,
+                        used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS referred_users
+                    (
+                        user_id TEXT PRIMARY KEY
+                    );
+                    """)
 
         conn.commit()
         cur.close()
@@ -100,69 +176,235 @@ def _init_db_sync():
         if conn: conn.close()
 
 
-def _save_data_sync(key: str, data):
-    """Stores JSON in kv_store under the provided key."""
+def _save_single_json_sync(table_name: str, key: str, data: dict):
     conn = _get_db_connection()
     if not conn: return
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO kv_store (key, value, updated_at)
-            VALUES (%s, %s::jsonb, NOW())
-            ON CONFLICT (key) DO UPDATE
-             SET value = EXCLUDED.value,
-                 updated_at = NOW();
-            """,
-            (key, json.dumps(data))
-        )
+        pk_column = 'user_id' if table_name in ['user_points', 'user_xp', 'referral_data', 'pending_referrals',
+                                                'gm_log', 'quest_submissions', 'submissions'] else 'key'
+        query = sql.SQL("""
+                        INSERT INTO {table} ({pk_column}, data)
+                        VALUES (%s, %s) ON CONFLICT ({pk_column})
+                        DO UPDATE
+                        SET data = EXCLUDED.data;
+                        """).format(table=sql.Identifier(table_name), pk_column=sql.Identifier(pk_column))
+        cur.execute(query, (key, json.dumps(data)))
         conn.commit()
         cur.close()
-        logger.info(f"💾 Saved key '{key}' to kv_store.")
+        logger.info(f"✅ Data saved to '{table_name}' with key '{key}'.")
     except Exception as e:
-        logger.error(f"❌ _save_data_sync('{key}') failed: {e}")
+        logger.error(f"❌ _save_single_json_sync to '{table_name}' failed: {e}")
     finally:
         if conn: conn.close()
 
-def _load_data_sync(key: str, default_value=None):
-    """Loads JSON from kv_store by key."""
+
+def _load_single_json_sync(table_name: str, key: str, default_value=None):
     conn = _get_db_connection()
     if not conn: return default_value
     try:
         cur = conn.cursor()
-        cur.execute("SELECT value FROM kv_store WHERE key = %s;", (key,))
+        pk_column = 'user_id' if table_name in ['user_points', 'user_xp', 'referral_data', 'pending_referrals',
+                                                'gm_log', 'quest_submissions', 'submissions'] else 'key'
+        query = sql.SQL("SELECT data FROM {table} WHERE {pk_column} = %s;").format(
+            table=sql.Identifier(table_name), pk_column=sql.Identifier(pk_column)
+        )
+        cur.execute(query, (key,))
         row = cur.fetchone()
         cur.close()
-        if row and row['value'] is not None:
-            return row['value']
+        if row and row['data'] is not None:
+            return row['data']
         return default_value
     except Exception as e:
-        logger.error(f"❌ _load_data_sync('{key}') failed: {e}")
+        logger.error(f"❌ _load_single_json_sync from '{table_name}' failed: {e}")
         return default_value
     finally:
         if conn: conn.close()
 
-def _log_points_transaction_sync(user_id: str, amount: float, purpose: str = None):
-    """Logs a transaction to the transactions table."""
+
+def _save_all_json_sync(table_name: str, data_dict: dict):
     conn = _get_db_connection()
     if not conn: return
     try:
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO transactions (user_id, amount, purpose) VALUES (%s, %s, %s);",
-            (user_id, amount, purpose)
-        )
+        pk_column = 'user_id' if table_name in ['user_points', 'user_xp', 'referral_data', 'pending_referrals',
+                                                'gm_log', 'quest_submissions', 'submissions'] else 'key'
+
+        delete_query = sql.SQL("DELETE FROM {table};").format(table=sql.Identifier(table_name))
+        cur.execute(delete_query)
+
+        if data_dict:
+            insert_query = sql.SQL("""
+                                   INSERT INTO {table} ({pk_column}, data)
+                                   VALUES (%s, %s);
+                                   """).format(table=sql.Identifier(table_name), pk_column=sql.Identifier(pk_column))
+
+            records_to_insert = [
+                (key, json.dumps(value)) for key, value in data_dict.items()
+            ]
+
+            psycopg2.extras.execute_batch(cur, insert_query, records_to_insert)
+
         conn.commit()
         cur.close()
-        logger.info(f"🧾 Logged transaction: user={user_id}, amount={amount:.2f}, purpose={purpose}")
+        logger.info(f"✅ All data saved to '{table_name}'.")
     except Exception as e:
-        logger.error(f"❌ _log_points_transaction_sync failed: {e}")
+        logger.error(f"❌ _save_all_json_sync to '{table_name}' failed: {e}")
     finally:
         if conn: conn.close()
 
-def _approved_proof_exists_sync(normalized_url: str) -> bool:
-    """Checks if a proof exists in approved_proofs table."""
+
+def _load_all_json_sync(table_name: str):
     conn = _get_db_connection()
+    if not conn: return {}
+    try:
+        cur = conn.cursor()
+        pk_column = 'user_id' if table_name in ['user_points', 'user_xp', 'referral_data', 'pending_referrals',
+                                                'gm_log', 'quest_submissions', 'submissions'] else 'key'
+        query = sql.SQL("SELECT {pk_column}, data FROM {table};").format(
+            table=sql.Identifier(table_name), pk_column=sql.Identifier(pk_column)
+        )
+        cur.execute(query)
+        rows = cur.fetchall()
+        cur.close()
+        data_dict = {row[pk_column]: row['data'] for row in rows}
+        return data_dict
+    except Exception as e:
+        logger.error(f"❌ _load_all_json_sync from '{table_name}' failed: {e}")
+        return {}
+    finally:
+        if conn: conn.close()
+
+
+def _save_list_values_sync(table_name: str, data_list: list, column_name: str):
+    conn = _get_db_connection()
+    if not conn: return
+    try:
+        cur = conn.cursor()
+        delete_query = sql.SQL("DELETE FROM {table};").format(table=sql.Identifier(table_name))
+        cur.execute(delete_query)
+
+        if data_list:
+            insert_query = sql.SQL("INSERT INTO {table} ({column_name}) VALUES (%s);").format(
+                table=sql.Identifier(table_name),
+                column_name=sql.Identifier(column_name)
+            )
+            records_to_insert = [(item,) for item in data_list]
+            psycopg2.extras.execute_batch(cur, insert_query, records_to_insert)
+
+        conn.commit()
+        cur.close()
+        logger.info(f"✅ List data saved to '{table_name}'.")
+    except Exception as e:
+        logger.error(f"❌ _save_list_values_sync to '{table_name}' failed: {e}")
+    finally:
+        if conn: conn.close()
+
+
+def _load_list_values_sync(table_name: str, column_name: str):
+    conn = _get_db_connection()
+    if not conn: return []
+    try:
+        cur = conn.cursor()
+        query = sql.SQL("SELECT {column_name} FROM {table};").format(
+            column_name=sql.Identifier(column_name),
+            table=sql.Identifier(table_name)
+        )
+        cur.execute(query)
+        rows = cur.fetchall()
+        cur.close()
+        return [row[column_name] for row in rows]
+    except Exception as e:
+        logger.error(f"❌ _load_list_values_sync from '{table_name}' failed: {e}")
+        return []
+    finally:
+        if conn: conn.close()
+
+
+def _save_list_of_json_sync(table_name: str, data_list: list):
+    conn = _get_db_connection()
+    if not conn: return
+    try:
+        cur = conn.cursor()
+        delete_query = sql.SQL("DELETE FROM {table};").format(table=sql.Identifier(table_name))
+        cur.execute(delete_query)
+
+        if data_list:
+            insert_query = sql.SQL("""
+                                   INSERT INTO {table} (data)
+                                   VALUES (%s);
+                                   """).format(table=sql.Identifier(table_name))
+
+            records_to_insert = [
+                (json.dumps(item),) for item in data_list
+            ]
+
+            psycopg2.extras.execute_batch(cur, insert_query, records_to_insert)
+
+        conn.commit()
+        cur.close()
+        logger.info(f"✅ List of JSON data saved to '{table_name}'.")
+    except Exception as e:
+        logger.error(f"❌ _save_list_of_json_sync to '{table_name}' failed: {e}")
+    finally:
+        if conn: conn.close()
+
+
+def _load_list_of_json_sync(table_name: str):
+    conn = _get_db_connection()
+    if not conn: return []
+    try:
+        cur = conn.cursor()
+        query = sql.SQL("SELECT data FROM {table};").format(table=sql.Identifier(table_name))
+        cur.execute(query)
+        rows = cur.fetchall()
+        cur.close()
+        return [row['data'] for row in rows]
+    except Exception as e:
+        logger.error(f"❌ _load_list_of_json_sync from '{table_name}' failed: {e}")
+        return []
+    finally:
+        if conn: conn.close()
+
+
+async def init_db(bot):
+    await bot.loop.run_in_executor(executor, _init_db_sync)
+
+
+async def load_single_json(bot, table_name: str, key: str, default_value=None):
+    return await bot.loop.run_in_executor(executor, _load_single_json_sync, table_name, key, default_value)
+
+
+async def save_single_json(bot, table_name: str, key: str, data):
+    await bot.loop.run_in_executor(executor, _save_single_json_sync, table_name, key, data)
+
+
+async def load_all_json(bot, table_name: str):
+    return await bot.loop.run_in_executor(executor, _load_all_json_sync, table_name)
+
+
+async def save_all_json(bot, table_name: str, data_dict: dict):
+    await bot.loop.run_in_executor(executor, _save_all_json_sync, table_name, data_dict)
+
+
+async def load_list_values(bot, table_name: str, column_name: str):
+    return await bot.loop.run_in_executor(executor, _load_list_values_sync, table_name, column_name)
+
+
+async def save_list_values(bot, table_name: str, data_list: list, column_name: str):
+    await bot.loop.run_in_executor(executor, _save_list_values_sync, table_name, data_list, column_name)
+
+
+async def save_list_of_json(bot, table_name: str, data_list: list):
+    await bot.loop.run_in_executor(executor, _save_list_of_json_sync, table_name, data_list)
+
+
+async def load_list_of_json(bot, table_name: str):
+    return await bot.loop.run_in_executor(executor, _load_list_of_json_sync, table_name)
+
+
+async def approved_proof_exists(bot, normalized_url: str) -> bool:
+    conn = await bot.loop.run_in_executor(executor, _get_db_connection)
     if not conn: return False
     try:
         cur = conn.cursor()
@@ -171,23 +413,19 @@ def _approved_proof_exists_sync(normalized_url: str) -> bool:
         cur.close()
         return exists
     except Exception as e:
-        logger.error(f"❌ _approved_proof_exists_sync failed: {e}")
+        logger.error(f"❌ approved_proof_exists failed: {e}")
         return False
     finally:
         if conn: conn.close()
 
-def _add_approved_proof_sync(normalized_url: str) -> bool:
-    """Adds a proof to the approved_proofs table."""
-    conn = _get_db_connection()
+
+async def add_approved_proof(bot, normalized_url: str) -> bool:
+    conn = await bot.loop.run_in_executor(executor, _get_db_connection)
     if not conn: return False
     try:
         cur = conn.cursor()
         cur.execute(
-            """
-            INSERT INTO approved_proofs (normalized_url)
-            VALUES (%s)
-            ON CONFLICT (normalized_url) DO NOTHING;
-            """,
+            "INSERT INTO approved_proofs (normalized_url) VALUES (%s) ON CONFLICT DO NOTHING;",
             (normalized_url,)
         )
         inserted = cur.rowcount > 0
@@ -195,24 +433,19 @@ def _add_approved_proof_sync(normalized_url: str) -> bool:
         cur.close()
         return inserted
     except Exception as e:
-        logger.error(f"❌ _add_approved_proof_sync failed: {e}")
+        logger.error(f"❌ add_approved_proof failed: {e}")
         return False
     finally:
         if conn: conn.close()
 
 
-def _add_processed_reaction_if_new_sync(reaction_identifier: str) -> bool:
-    """Adds a reaction to processed_reactions table if new."""
-    conn = _get_db_connection()
+async def add_processed_reaction_if_new(bot, reaction_identifier: str) -> bool:
+    conn = await bot.loop.run_in_executor(executor, _get_db_connection)
     if not conn: return False
     try:
         cur = conn.cursor()
         cur.execute(
-            """
-            INSERT INTO processed_reactions (reaction_identifier)
-            VALUES (%s)
-            ON CONFLICT (reaction_identifier) DO NOTHING;
-            """,
+            "INSERT INTO processed_reactions (reaction_identifier) VALUES (%s) ON CONFLICT DO NOTHING;",
             (reaction_identifier,)
         )
         inserted = cur.rowcount > 0
@@ -220,86 +453,33 @@ def _add_processed_reaction_if_new_sync(reaction_identifier: str) -> bool:
         cur.close()
         return inserted
     except Exception as e:
-        logger.error(f"❌ _add_processed_reaction_if_new_sync failed: {e}")
+        logger.error(f"❌ add_processed_reaction_if_new failed: {e}")
         return False
     finally:
         if conn: conn.close()
 
 
-def _mb_add_use_sync(user_id: str):
-    """Logs a mysterybox use."""
+def _log_points_transaction_sync(user_id: str, amount: float, purpose: str = None):
     conn = _get_db_connection()
     if not conn: return
     try:
         cur = conn.cursor()
-        cur.execute("INSERT INTO mysterybox_uses (user_id) VALUES (%s);", (user_id,))
+        transaction_data = {
+            "user_id": user_id,
+            "amount": amount,
+            "purpose": purpose,
+            "timestamp": datetime.now(UTC).isoformat()
+        }
+        query = sql.SQL("INSERT INTO points_history (data) VALUES (%s);").format()
+        cur.execute(query, (json.dumps(transaction_data),))
         conn.commit()
         cur.close()
+        logger.info(f"✅ Transaction logged for user {user_id}: {amount} for {purpose}.")
     except Exception as e:
-        logger.error(f"❌ _mb_add_use_sync failed: {e}")
+        logger.error(f"❌ _log_points_transaction_sync failed: {e}")
     finally:
         if conn: conn.close()
 
-
-def _mb_get_uses_in_last_24h_sync(user_id: str) -> int:
-    """Gets the count of mysterybox uses for a user in the last 24h."""
-    conn = _get_db_connection()
-    if not conn: return 0
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT COUNT(*) FROM mysterybox_uses
-            WHERE user_id = %s AND used_at >= (NOW() - INTERVAL '24 hours');
-            """,
-            (user_id,)
-        )
-        count = cur.fetchone()['count']
-        cur.close()
-        return int(count)
-    except Exception as e:
-        logger.error(f"❌ _mb_get_uses_in_last_24h_sync failed: {e}")
-        return 0
-    finally:
-        if conn: conn.close()
-
-
-# --------------------------------------------------
-# ✅ ASYNC WRAPPER FUNCTIONS (for your bot's cogs)
-# These functions should be used with 'await'
-# --------------------------------------------------
-async def init_db(bot):
-    """Initializes the database asynchronously."""
-    await bot.loop.run_in_executor(executor, _init_db_sync)
-
-async def save_data(bot, key: str, data):
-    """Stores JSON data in the kv_store asynchronously."""
-    await bot.loop.run_in_executor(executor, _save_data_sync, key, data)
-
-async def load_data(bot, key: str, default_value=None):
-    """Loads JSON data from the kv_store asynchronously."""
-    return await bot.loop.run_in_executor(executor, _load_data_sync, key, default_value)
 
 async def log_points_transaction(bot, user_id: str, amount: float, purpose: str = None):
-    """Logs a transaction to the transactions table asynchronously."""
     await bot.loop.run_in_executor(executor, _log_points_transaction_sync, user_id, amount, purpose)
-
-async def approved_proof_exists(bot, normalized_url: str) -> bool:
-    """Checks if a proof exists asynchronously."""
-    return await bot.loop.run_in_executor(executor, _approved_proof_exists_sync, normalized_url)
-
-async def add_approved_proof(bot, normalized_url: str) -> bool:
-    """Adds a proof to the approved_proofs table asynchronously."""
-    return await bot.loop.run_in_executor(executor, _add_approved_proof_sync, normalized_url)
-
-async def add_processed_reaction_if_new(bot, reaction_identifier: str) -> bool:
-    """Adds a reaction to processed_reactions table if new asynchronously."""
-    return await bot.loop.run_in_executor(executor, _add_processed_reaction_if_new_sync, reaction_identifier)
-
-async def mb_add_use(bot, user_id: str):
-    """Logs a mysterybox use asynchronously."""
-    await bot.loop.run_in_executor(executor, _mb_add_use_sync, user_id)
-
-async def mb_get_uses_in_last_24h(bot, user_id: str) -> int:
-    """Gets the count of mysterybox uses for a user in the last 24h asynchronously."""
-    return await bot.loop.run_in_executor(executor, _mb_get_uses_in_last_24h_sync, user_id)
