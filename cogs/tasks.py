@@ -30,7 +30,6 @@ class TasksCog(commands.Cog):
         self.update_giveaway_winners_history.cancel()
         self.reset_vip_posts.cancel()
 
-
     # --- T H E      E C O N O M Y      M E S S A G E       L O O P ---
     @tasks.loop(minutes=5)
     async def update_economy_message(self):
@@ -48,7 +47,9 @@ class TasksCog(commands.Cog):
                 return
 
             economy_embed = await commands_cog.get_economy_embed()
-            economy_message_id = self.bot.bot_data.get("economy_message_id")
+            # [FIXED] Load the bot_data dictionary from the database
+            bot_data = await self.bot.load_single_json("bot_data", "main", {})
+            economy_message_id = bot_data.get("economy_message_id")
 
             if economy_message_id:
                 try:
@@ -57,18 +58,18 @@ class TasksCog(commands.Cog):
                     logger.info("✅ Economy message updated successfully.")
                 except discord.NotFound:
                     message = await channel.send(embed=economy_embed)
-                    self.bot.bot_data["economy_message_id"] = message.id
+                    bot_data["economy_message_id"] = message.id
                     logger.info("✅ Old economy message not found. A new one has been sent.")
                 except discord.Forbidden:
                     logger.error(
                         f"❌ Bot missing permissions to edit message in channel ({config.FIRST_ODOGWU_CHANNEL_ID}).")
             else:
                 message = await channel.send(embed=economy_embed)
-                self.bot.bot_data["economy_message_id"] = message.id
+                bot_data["economy_message_id"] = message.id
                 logger.info("✅ New economy message sent and its ID saved.")
 
-            # ✅ Await the save_data call
-            await self.bot.save_data("bot_data", self.bot.bot_data)
+            # [FIXED] Await the save_single_json call with the correct parameters
+            await self.bot.save_single_json("bot_data", "main", bot_data)
         except discord.Forbidden:
             logger.error(f"❌ Bot missing permissions to send messages in channel ({config.FIRST_ODOGWU_CHANNEL_ID}).")
         except Exception as e:
@@ -91,33 +92,33 @@ class TasksCog(commands.Cog):
                     f"❌ Error: Leaderboard channel not found (ID: {config.PERIODIC_LEADERBOARD_CHANNEL_ID}).")
                 return
 
-            # Load the latest bot_data from the database before performing any operations
-            self.bot.bot_data = await self.bot.load_data(self.bot, "bot_data_table", {})
+            # [FIXED] Load the latest bot_data from the database
+            bot_data = await self.bot.load_single_json("bot_data", "main", {})
 
             await self.bot.manage_periodic_message(
                 channel=channel,
-                bot_data=self.bot.bot_data,
+                bot_data=bot_data,
                 message_id_key="points_leaderboard_message_id",
                 embed=await commands_cog.get_points_leaderboard_embed(),
                 pin=True
             )
             await self.bot.manage_periodic_message(
                 channel=channel,
-                bot_data=self.bot.bot_data,
+                bot_data=bot_data,
                 message_id_key="referral_leaderboard_message_id",
                 embed=await commands_cog.get_referral_leaderboard_embed(),
                 pin=True
             )
             await self.bot.manage_periodic_message(
                 channel=channel,
-                bot_data=self.bot.bot_data,
+                bot_data=bot_data,
                 message_id_key="xp_leaderboard_message_id",
                 embed=await commands_cog.get_xp_leaderboard_embed(),
                 pin=True
             )
 
-            # ✅ FIX: Use the consistent database key "bot_data_table"
-            await self.bot.save_data(self.bot, "bot_data_table", self.bot.bot_data)
+            # [FIXED] Use the consistent database key "main" and save
+            await self.bot.save_single_json("bot_data", "main", bot_data)
             logger.info("✅ All leaderboards updated successfully.")
         except discord.Forbidden:
             logger.error("Bot is missing permissions to send, edit, or pin messages in the leaderboard channel.")
@@ -135,10 +136,10 @@ class TasksCog(commands.Cog):
             logger.error("Error: Server not found. Cannot award weekly XP bonus.")
             return
 
-        # ✅ FIX: Load the user points and XP data from the database
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
-        user_xp = await self.bot.load_data(self.bot, "user_xp", {})
-        admin_points = await self.bot.load_data(self.bot, "admin_points", {})
+        # [FIXED] Load the user points and XP data from the database
+        users_points = await self.bot.load_all_json("user_points")
+        user_xp = await self.bot.load_all_json("user_xp")
+        admin_points = await self.bot.load_single_json("admin_points", "main", {})
 
         eligible = {}
         allowed_roles = [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID]
@@ -158,7 +159,7 @@ class TasksCog(commands.Cog):
         points_to_award_per_user = 200
         total_points_to_award = len(top_users) * points_to_award_per_user
 
-        # ✅ FIX: Use the loaded admin_points dictionary
+        # [FIXED] Use the loaded admin_points dictionary
         if admin_points.get("balance", 0) < total_points_to_award:
             logger.warning("⚠️ Admin balance is too low to award weekly XP bonus. Skipping.")
             return
@@ -170,18 +171,18 @@ class TasksCog(commands.Cog):
 
         for uid, _ in top_users:
             user_id = str(uid)
-            # ✅ FIX: Modify the loaded users_points dictionary
+            # [FIXED] Modify the loaded users_points dictionary
             users_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
             users_points[user_id]["all_time_points"] += points_to_award_per_user
             users_points[user_id]["available_points"] += points_to_award_per_user
             await commands_cog.log_points_transaction(user_id, float(points_to_award_per_user), "Weekly XP bonus")
 
-        # ✅ FIX: Modify the loaded admin_points and save all data
+        # [FIXED] Modify the loaded admin_points and save all data
         admin_points["balance"] -= total_points_to_award
         admin_points["in_circulation"] += total_points_to_award
 
-        await self.bot.save_data(self.bot, "users_points", users_points)
-        await self.bot.save_data(self.bot, "admin_points", admin_points)
+        await self.bot.save_all_json("user_points", users_points)
+        await self.bot.save_single_json("admin_points", "main", admin_points)
 
         reward_channel = self.bot.get_channel(config.XP_REWARD_CHANNEL_ID)
         if reward_channel:
@@ -232,9 +233,9 @@ class TasksCog(commands.Cog):
         """
         await self.bot.wait_until_ready()
 
-        # ✅ FIX: Load both giveaway logs from the database
-        giveaway_winners_log = await self.bot.load_data(self.bot, "giveaway_logs", [])
-        all_time_giveaway_winners_log = await self.bot.load_data(self.bot, "all_time_giveaway_logs", [])
+        # [FIXED] Load both giveaway logs from the database
+        giveaway_winners_log = await self.bot.load_list_of_json("giveaway_logs")
+        all_time_giveaway_winners_log = await self.bot.load_list_of_json("all_time_giveaway_logs")
 
         if not giveaway_winners_log:
             logger.info("No new giveaway winners to update. Skipping.")
@@ -245,7 +246,7 @@ class TasksCog(commands.Cog):
             logger.error(f"❌ Error: Giveaway channel with ID {config.GIVEAWAY_CHANNEL_ID} not found.")
             return
 
-        # ✅ FIX: Append the new winners to the all-time log
+        # [FIXED] Append the new winners to the all-time log
         all_time_giveaway_winners_log.extend(giveaway_winners_log)
 
         embed = discord.Embed(
@@ -253,7 +254,7 @@ class TasksCog(commands.Cog):
             description="Here’s the full hall of fame for all giveaways so far 🏆",
             color=discord.Color.gold()
         )
-        # ✅ FIX: Use the loaded all_time_giveaway_winners_log
+        # [FIXED] Use the loaded all_time_giveaway_winners_log
         for winner in all_time_giveaway_winners_log:
             user = self.bot.get_user(int(winner['user_id']))
             user_name = user.mention if user else f"User ID: {winner['user_id']}"
@@ -265,20 +266,21 @@ class TasksCog(commands.Cog):
         embed.set_footer(text="Updated automatically as giveaways happen 🚀")
         embed.timestamp = datetime.now(UTC)
 
-        # ✅ FIX: Correct manage_periodic_message call
+        bot_data = await self.bot.load_single_json("bot_data", "main", {})
         await self.bot.manage_periodic_message(
             channel=channel,
-            bot_data=self.bot.bot_data,
+            bot_data=bot_data,
             message_id_key="giveaway_history_message_id",
             embed=embed,
             pin=False
         )
+        # [FIXED] Save the bot_data with the new message ID
+        await self.bot.save_single_json("bot_data", "main", bot_data)
 
-        # ✅ FIX: Clear the weekly log and save both to the database
+        # [FIXED] Clear the weekly log and save both to the database
         giveaway_winners_log.clear()
-        await self.bot.save_data(self.bot, "giveaway_logs", giveaway_winners_log)
-        await self.bot.save_data(self.bot, "all_time_giveaway_logs", all_time_giveaway_winners_log)
-        await self.bot.save_data(self.bot, "bot_data", self.bot.bot_data)
+        await self.bot.save_list_of_json("giveaway_logs", giveaway_winners_log)
+        await self.bot.save_list_of_json("all_time_giveaway_logs", all_time_giveaway_winners_log)
         logger.info("✅ Giveaway history updated and temporary log cleared.")
 
     # --- V I P      P O S T      R E S E T       L O O P ---
@@ -288,7 +290,8 @@ class TasksCog(commands.Cog):
         await self.bot.wait_until_ready()
         try:
             vip_posts = {}
-            await self.bot.save_data(self.bot, "vip_posts", vip_posts)
+            # [FIXED] Use the correct save function
+            await self.bot.save_all_json("vip_posts", vip_posts)
             logger.info("🔄 VIP post limit reset.")
         except Exception as e:
             logger.error(f"❌ An error occurred during the VIP post reset task: {e}")
