@@ -57,7 +57,7 @@ def _init_db_sync():
                     );
                     """)
         cur.execute("""
-                    CREATE TABLE IF NOT EXISTS user_points
+                    CREATE TABLE IF NOT EXISTS users_points
                     (
                         user_id TEXT PRIMARY KEY,
                         data    JSONB
@@ -181,7 +181,7 @@ def _save_single_json_sync(table_name: str, key: str, data: dict):
     if not conn: return
     try:
         cur = conn.cursor()
-        pk_column = 'user_id' if table_name in ['user_points', 'user_xp', 'referral_data', 'pending_referrals',
+        pk_column = 'user_id' if table_name in ['users_points', 'user_xp', 'referral_data', 'pending_referrals',
                                                 'gm_log', 'quest_submissions', 'submissions'] else 'key'
         query = sql.SQL("""
                         INSERT INTO {table} ({pk_column}, data)
@@ -204,7 +204,7 @@ def _load_single_json_sync(table_name: str, key: str, default_value=None):
     if not conn: return default_value
     try:
         cur = conn.cursor()
-        pk_column = 'user_id' if table_name in ['user_points', 'user_xp', 'referral_data', 'pending_referrals',
+        pk_column = 'user_id' if table_name in ['users_points', 'user_xp', 'referral_data', 'pending_referrals',
                                                 'gm_log', 'quest_submissions', 'submissions'] else 'key'
         query = sql.SQL("SELECT data FROM {table} WHERE {pk_column} = %s;").format(
             table=sql.Identifier(table_name), pk_column=sql.Identifier(pk_column)
@@ -227,7 +227,7 @@ def _save_all_json_sync(table_name: str, data_dict: dict):
     if not conn: return
     try:
         cur = conn.cursor()
-        pk_column = 'user_id' if table_name in ['user_points', 'user_xp', 'referral_data', 'pending_referrals',
+        pk_column = 'user_id' if table_name in ['users_points', 'user_xp', 'referral_data', 'pending_referrals',
                                                 'gm_log', 'quest_submissions', 'submissions'] else 'key'
 
         delete_query = sql.SQL("DELETE FROM {table};").format(table=sql.Identifier(table_name))
@@ -259,7 +259,7 @@ def _load_all_json_sync(table_name: str):
     if not conn: return {}
     try:
         cur = conn.cursor()
-        pk_column = 'user_id' if table_name in ['user_points', 'user_xp', 'referral_data', 'pending_referrals',
+        pk_column = 'user_id' if table_name in ['users_points', 'user_xp', 'referral_data', 'pending_referrals',
                                                 'gm_log', 'quest_submissions', 'submissions'] else 'key'
         query = sql.SQL("SELECT {pk_column}, data FROM {table};").format(
             table=sql.Identifier(table_name), pk_column=sql.Identifier(pk_column)

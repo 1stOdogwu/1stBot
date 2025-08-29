@@ -1,5 +1,8 @@
 # Standard library imports
 import os
+import atexit
+import signal
+import asyncio
 import time
 from datetime import datetime, UTC
 import discord
@@ -79,7 +82,7 @@ class MyBot(commands.Bot):
         self.ticket_messages_to_archive = {}
 
     async def load_all_data_from_db(self):
-        self.users_points = await self.load_all_json(self, "user_points")
+        self.users_points = await self.load_all_json(self, "users_points")
         self.submissions = await self.load_all_json(self, "submissions")
         self.vip_posts = await self.load_all_json(self, "vip_posts")
         self.user_xp = await self.load_all_json(self, "user_xp")
@@ -291,6 +294,34 @@ class MyBot(commands.Bot):
         except Exception as e:
             logger.error(f"An unexpected error occurred while logging a transaction: {e}", exc_info=True)
 
+    async def on_logout(self):
+        logger.info("Bot is logging out, saving all data...")
+        await self.save_all_data_to_db()
+        logger.info("✅ All data saved on logout.")
+
+
+def save_on_exit():
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            coro = bot.save_all_data_to_db()
+            loop.create_task(coro)
+            loop.run_until_complete(coro)
+        else:
+            loop.run_until_complete(bot.save_all_data_to_db())
+        logger.info("✅ All data saved before exit (atexit/signal).")
+    except Exception as e:
+        logger.error(f"❌ Error saving data on exit: {e}")
+
+atexit.register(save_on_exit)
+
+def handle_signal(sig, _frame):
+    logger.info(f"Received signal {sig}. Saving data before shutdown...")
+    save_on_exit()
+    exit(0)
+
+for signal_type in (signal.SIGINT, signal.SIGTERM):
+    signal.signal(signal_type, handle_signal)
 
 bot = MyBot()
 bot.run(TOKEN)

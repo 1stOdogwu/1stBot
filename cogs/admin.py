@@ -24,7 +24,7 @@ class AdminCommands(commands.Cog):
         Builds a premium embed for the economy status message.
         """
         try:
-            admin_data = await self.bot.load_data(self.bot, "admin_points", {})
+            admin_data = await self.bot.load_single_json("admin_points", "main", {})
             # Use bot attribute for color
             embed_color = discord.Color.from_rgb(255, 204, 0)
 
@@ -91,7 +91,7 @@ class AdminCommands(commands.Cog):
             description="These are the top community members who are growing the server! 🚀",
             color=discord.Color.gold()
         )
-        referral_data = await self.bot.load_data(self.bot, "referral_data", {})
+        referral_data = await self.bot.load_all_json("referral_data")
 
         # Count referrals for each user
         referral_counts = {}
@@ -196,7 +196,6 @@ class AdminCommands(commands.Cog):
         return embed
 
 
-
     #   X P      L E A D E R B O A R D       E M B E D      M E S S A G E
     async def get_xp_leaderboard_embed(self):
         """
@@ -208,7 +207,7 @@ class AdminCommands(commands.Cog):
             logger.error(f"❌ Guild with ID {config.SERVER_ID} not found.")
             return discord.Embed(description="Server not found. Please check configuration.")
 
-        user_xp = await self.bot.load_data(self.bot, "user_xp", {})
+        user_xp = await self.bot.load_all_json("user_xp")
 
         # 2. Filter eligible users efficiently
         eligible_users = {}
@@ -265,8 +264,8 @@ class AdminCommands(commands.Cog):
         This function should be called after a new winner is added to the temporary log.
         """
         # ✅ STEP 1: Load the data from the database
-        temporary_winners = await self.bot.load_data(self.bot, "giveaway_logs", [])
-        all_time_winners = await self.bot.load_data(self.bot, "all_time_giveaway_logs", [])
+        temporary_winners = await self.bot.load_list_of_json("giveaway_logs")
+        all_time_winners = await self.bot.load_list_of_json("all_time_giveaway_logs")
 
         if not temporary_winners:
             logger.info("No new giveaway winners to append to history.")
@@ -286,20 +285,19 @@ class AdminCommands(commands.Cog):
         logger.info("✅ New winners appended to the all-time log and temporary log cleared.")
 
         # ✅ STEP 5: Save both lists back to the database
-        await self.bot.save_data(self.bot, "all_time_giveaway_logs", all_time_winners)
-        await self.bot.save_data(self.bot, "giveaway_logs", temporary_winners)
+        await self.bot.save_list_of_json("all_time_giveaway_logs", self.all_time_giveaway_winners_log)
+        await self.bot.save_list_of_json("giveaway_logs", self.giveaway_winners_log)
 
         # 6. Call the helper function to update the history message
         await self.bot.update_giveaway_winners_history_message()
 
     # === P O I N T S    H I S T O R Y    M E S S A G E ===
-    # === P O I N T S    H I S T O R Y    M E S S A G E ===
     async def update_points_history_message(self):
         """Periodically updates the point history message in a dedicated channel."""
 
         # ✅ STEP 1: Load the data from the database
-        points_history = await self.bot.load_data(self.bot, "points_history", [])
-        bot_data = await self.bot.load_data(self.bot, "bot_data", {})
+        points_history = await self.bot.load_list_of_json("points_history")
+        bot_data = await self.bot.load_single_json("bot_data", "main", {})
 
         # 1. Access the channel ID from the bot object
         channel = self.bot.get_channel(config.POINTS_HISTORY_CHANNEL_ID)
@@ -427,8 +425,8 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # ✅ STEP 1: Load both datasets asynchronously from the database
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
-        referral_data = await self.bot.load_data(self.bot, "referral_data", {})
+        users_points = await self.bot.load_all_json("user_points")
+        referral_data = await self.bot.load_all_json("referral_data")
 
         # 1. Pre-process referral data for efficient lookup
         referral_counts = {}
@@ -484,8 +482,8 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ STEP 1: Load data from the database. We no longer rely on self.bot.referred_users as the source of truth.
-        referred_users = set(await self.bot.load_data(self.bot, "referred_users", []))
-        pending_referrals = await self.bot.load_data(self.bot, "pending_referrals", {})
+        referred_users = set(await self.bot.load_list_values("referred_users", "user_id"))
+        pending_referrals = await self.bot.load_all_json("pending_referrals")
 
         user_id = str(member.id)
         if user_id in referred_users:
@@ -519,7 +517,7 @@ class AdminCommands(commands.Cog):
             logger.info(f"New pending referral for {member.name}. Referrer: {referrer.name}")
 
             # ✅ STEP 2: Save the updated pending referrals list back to the database
-            await self.bot.save_data(self.bot, "pending_referrals", pending_referrals)
+            await self.bot.save_all_json("pending_referrals", self.pending_referrals)
 
             # ✅ FIX: Send the message to the referral channel instead of the user's DMs
             channel = self.bot.get_channel(config.REFERRAL_CHANNEL_ID)
@@ -557,11 +555,11 @@ class AdminCommands(commands.Cog):
         # ✅ STEP 1: Load all necessary data at the beginning of the function
         # This ensures that we have the most up-to-date information from the database
         # and a "transaction" can be completed safely.
-        pending_referrals = await self.bot.load_data(self.bot, "pending_referrals", {})
-        referred_users = set(await self.bot.load_data(self.bot, "referred_users", []))
-        admin_points = await self.bot.load_data(self.bot, "admin_points", {})
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
-        referral_data = await self.bot.load_data(self.bot, "referral_data", {})
+        pending_referrals = await self.bot.load_all_json("pending_referrals")
+        referred_users = set(await self.bot.load_list_values("referred_users", "user_id"))
+        admin_points = await self.bot.load_single_json("admin_points", "main", {})
+        users_points = await self.bot.load_all_json("users_points")
+        referral_data = await self.bot.load_all_json("referral_data")
 
         # --- Welcome Message Logic for Newly 'Tivated' Users ---
         if config.TIVATED_ROLE_ID in [role.id for role in new_roles]:
@@ -640,18 +638,16 @@ class AdminCommands(commands.Cog):
                     admin_points["in_circulation"] += total_points_to_award
                     referral_data[user_id] = referrer_id
 
-                    # ✅ STEP 2: Save the primary data immediately after modification.
-                    # This ensures the most important changes are written to the database first.
-                    await self.bot.save_data(self.bot, "admin_points", admin_points)
-                    await self.bot.save_data(self.bot, "users_points", users_points)
-                    await self.bot.save_data(self.bot, "referral_data", referral_data)
+                    await self.bot.save_all_json("users_points", users_points)
+                    await self.bot.save_single_json("admin_points", "main", admin_points)
+                    await self.bot.save_all_json("referral_data", self.referral_data)
 
                     # ✅ STEP 3: Now that data is saved, modify and save the other tables.
                     # We can now safely delete the user from pending and add it into referred.
                     del pending_referrals[user_id]
                     referred_users.add(user_id)
-                    await self.bot.save_data(self.bot, "pending_referrals", pending_referrals)
-                    await self.bot.save_data(self.bot, "referred_users", list(referred_users))
+                    await self.bot.save_all_json("pending_referrals", self.pending_referrals)
+                    await self.bot.save_list_values("referred_users", list(self.referred_users), "user_id")
 
                     # Log the transactions using the refactored helper function
                     if new_member_points > 0:
@@ -761,7 +757,7 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load the referral data from the database
-        referral_data = await self.bot.load_data(self.bot, "referral_data", {})
+        referral_data = await self.bot.load_all_json("referral_data")
         referrer_id = str(ctx.author.id)
         referred_members = [user_id for user_id, ref_id in referral_data.items() if ref_id == referrer_id]
 
@@ -817,8 +813,8 @@ class AdminCommands(commands.Cog):
                                att.content_type and att.content_type.startswith('image/')])
 
         # ✅ FIX: Load the submissions and approved proofs from the database
-        approved_proofs = await self.bot.load_data(self.bot, "approved_proofs", [])
-        submissions = await self.bot.load_data(self.bot, "submissions", {})
+        approved_proofs = await self.bot.load_list_values("approved_proofs", "normalized_url")
+        submissions = await self.bot.load_list_of_json("submissions")
 
         # 2. Validate Proofs
         if not all_proof_urls:
@@ -872,7 +868,7 @@ class AdminCommands(commands.Cog):
         }
 
         # ✅ FIX: Save the updated submissions dictionary immediately
-        await self.bot.save_data(self.bot, "submissions", submissions)
+        await self.bot.save_all_json("submissions", self.submissions)
 
         # 6. Notify Moderators
         mod_channel = self.bot.get_channel(config.MOD_TASK_REVIEW_CHANNEL_ID)
@@ -919,10 +915,10 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load all necessary data from the database at the start
-        submissions = await self.bot.load_data(self.bot, "submissions", {})
-        admin_points = await self.bot.load_data(self.bot, "admin_points", {})
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
-        approved_proofs = await self.bot.load_data(self.bot, "approved_proofs", [])
+        submissions = await self.bot.load_list_of_json("submissions")
+        admin_points = await self.bot.load_single_json("admin_points", "main", {})
+        users_points = await self.bot.load_all_json("users_points")
+        approved_proofs = await self.bot.load_list_of_json("approved_proofs")
 
         user_id = str(member.id)
         action = action.lower()
@@ -966,16 +962,16 @@ class AdminCommands(commands.Cog):
                     approved_proofs.append(url)
 
             # ✅ FIX: Save the updated data immediately after the transaction
-            await self.bot.save_data(self.bot, "users_points", users_points)
-            await self.bot.save_data(self.bot, "admin_points", admin_points)
-            await self.bot.save_data(self.bot, "approved_proofs", approved_proofs)
+            await self.bot.save_all_json("users_points", users_points)
+            await self.bot.save_single_json("admin_points", "main", admin_points)
+            await self.bot.save_list_of_json("approved_proofs", approved_proofs)
 
             # 5. Log the transaction and clear the submission from the loaded data
             await self.bot.log_points_transaction(user_id, points_to_award, "Task submission approved")
             del submissions[user_id]
 
             # ✅ FIX: Save the updated submissions dictionary
-            await self.bot.save_data(self.bot, "submissions", submissions)
+            await self.bot.save_list_of_json("submissions", submissions)
 
             user_embed = discord.Embed(title="✅ Submission Approved!",
                                        description=f"Your engagement proof has been approved. You earned **{points_to_award:.2f} points**!",
@@ -1126,7 +1122,7 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load the user points table from the database
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
+        users_points = await self.bot.load_all_json("users_points")
 
         target_member = member if member else ctx.author
         user_id = str(target_member.id)
@@ -1190,10 +1186,10 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load data from the database before modifying it
-        admin_points = await self.bot.load_data(self.bot, "admin_points", {})
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
-        giveaway_winners_log = await self.bot.load_data(self.bot, "giveaway_winners_log", [])
-        all_time_giveaway_winners_log = await self.bot.load_data(self.bot, "all_time_giveaway_winners_log", [])
+        admin_points = await self.bot.load_single_json("admin_points", "main", {})
+        users_points = await self.bot.load_all_json("users_points")
+        giveaway_winners_log = await self.bot.load_list_of_json("giveaway_logs")
+        all_time_giveaway_winners_log = await self.bot.load_list_of_json("all_time_giveaway_logs")
 
         total_points = points_to_add * len(members)
         if admin_points.get("balance", 0) < total_points:
@@ -1221,10 +1217,10 @@ class AdminCommands(commands.Cog):
         admin_points["in_circulation"] += total_points
 
         # ✅ FIX: Save all the updated data back to the database
-        await self.bot.save_data(self.bot, "users_points", users_points)
-        await self.bot.save_data(self.bot, "admin_points", admin_points)
-        await self.bot.save_data(self.bot, "giveaway_winners_log", giveaway_winners_log)
-        await self.bot.save_data(self.bot, "all_time_giveaway_winners_log", all_time_giveaway_winners_log)
+        await self.bot.save_all_json("users_points", users_points)
+        await self.bot.save_single_json("admin_points", "main", admin_points)
+        await self.bot.save_list_of_json("giveaway_logs", self.giveaway_winners_log)
+        await self.bot.save_list_of_json("all_time_giveaway_logs", self.all_time_giveaway_winners_log)
 
         embed = discord.Embed(title="🎉 Points Awarded!", description=f"The following user(s) have been awarded points:",
                               color=discord.Color.gold())
@@ -1303,6 +1299,7 @@ class AdminCommands(commands.Cog):
             self.bot.users_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
             self.bot.users_points[user_id]["all_time_points"] += points
             self.bot.users_points[user_id]["available_points"] += points
+            await self.bot.save_all_json("users_points", self.users_points)
 
             await self.bot.log_points_transaction(user_id, points, purpose)
 
@@ -1316,8 +1313,8 @@ class AdminCommands(commands.Cog):
         self.bot.admin_points["balance"] -= total_points
         self.bot.admin_points["in_circulation"] += total_points
 
-        # We removed all the save_data() and update_giveaway_winners_history() calls here.
-        # The periodic save_logs_periodically task handles this.
+        await self.bot.save_single_json("admin_points", "main", self.admin_points)
+
 
         # 5. Send a confirmation embed
         embed = discord.Embed(title="🎉 Points Awarded!",
@@ -1344,7 +1341,7 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load the user points from the database
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
+        users_points = await self.bot.load_all_json("users_points")
 
         user_id = str(ctx.author.id)
         user_data = users_points.get(user_id, {"all_time_points": 0.0})
@@ -1410,7 +1407,7 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load the user points from the database
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
+        users_points = await self.bot.load_all_json("users_points")
 
         # 2. Filter and sort the eligible users
         eligible_users = {}
@@ -1475,7 +1472,7 @@ class AdminCommands(commands.Cog):
             return
 
         # 3. Validate user balance
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
+        users_points = await self.bot.load_all_json("users_points")
         user_id = str(ctx.author.id)
         user_data = users_points.get(user_id, {"all_time_points": 0.0, "available_points": 0.0})
         balance = user_data.get("available_points", 0.0)
@@ -1535,7 +1532,7 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load the user points from the database
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
+        users_points = await self.bot.load_all_json("users_points")
 
         user_id = str(ctx.author.id)
         user_data = users_points.get(user_id, {})
@@ -1555,7 +1552,7 @@ class AdminCommands(commands.Cog):
                 users_points[user_id] = user_data
 
                 # ✅ FIX: Save the updated users_points immediately if the request timed out
-                await self.bot.save_data(self.bot, "users_points", users_points)
+                await self.bot.save_all_json("users_points", users_points)
 
             embed = discord.Embed(title="❌ Request Timed Out",
                                   description="Your payout request timed out. Please start a new request with `!requestpayout`.",
@@ -1576,7 +1573,7 @@ class AdminCommands(commands.Cog):
         user_data["available_points"] -= total_deduction
 
         # ✅ FIX: Save the updated user points dictionary after the point deduction
-        await self.bot.save_data(self.bot, "users_points", users_points)
+        await self.bot.save_all_json("users_points", users_points)
 
         # 4. Notify the user and moderators
         mod_channel = self.bot.get_channel(config.MOD_PAYMENT_REVIEW_CHANNEL_ID)
@@ -1619,8 +1616,8 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load both user and admin points from the database
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
-        admin_points = await self.bot.load_data(self.bot, "admin_points", {})
+        users_points = await self.bot.load_all_json("users_points")
+        admin_points = await self.bot.load_single_json("admin_points", "main", {})
 
         user_id = str(member.id)
         user_data = users_points.get(user_id, {})
@@ -1661,8 +1658,8 @@ class AdminCommands(commands.Cog):
         users_points[user_id] = user_data
 
         # ✅ FIX: Save both updated dictionaries to the database
-        await self.bot.save_data(self.bot, "users_points", users_points)
-        await self.bot.save_data(self.bot, "admin_points", admin_points)
+        await self.bot.save_all_json("users_points", users_points)
+        await self.bot.save_single_json("admin_points", "main", admin_points)
 
         # 3. Notify the user and moderator
         user_embed = discord.Embed(title="💸 Payout Processed!",
@@ -1697,7 +1694,7 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load the user XP data from the database
-        user_xp = await self.bot.load_data(self.bot, "user_xp", {})
+        user_xp = await self.bot.load_all_json("user_xp")
 
         target_member = member if member else ctx.author
         user_id = str(target_member.id)
@@ -1766,7 +1763,7 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load quest data before updating
-        weekly_quests = await self.bot.load_data(self.bot, "weekly_quests", {"week": 0, "quests": []})
+        weekly_quests = await self.bot.load_single_json("weekly_quests", "main", {"week": 0, "quests": []})
 
         # 1. Update quests on the loaded dictionaries
         weekly_quests["week"] += 1
@@ -1774,8 +1771,8 @@ class AdminCommands(commands.Cog):
         quest_submissions = {}  # Resetting previous submissions
 
         # ✅ FIX: Save the updated data immediately
-        await self.bot.save_data(self.bot, "weekly_quests", weekly_quests)
-        await self.bot.save_data(self.bot, "quest_submissions", quest_submissions)
+        await self.bot.save_single_json("weekly_quests", "main", self.weekly_quests)
+        await self.bot.save_all_json("quest_submissions", self.quest_submissions)
 
         # 2. Post new quests and send confirmation
         board = self.bot.get_channel(config.QUEST_BOARD_CHANNEL_ID)
@@ -1817,9 +1814,9 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load all necessary data from the database
-        weekly_quests = await self.bot.load_data(self.bot, "weekly_quests", {"week": "0"})
-        quest_submissions = await self.bot.load_data(self.bot, "quest_submissions", {})
-        approved_proofs = await self.bot.load_data(self.bot, "approved_proofs", [])
+        weekly_quests = await self.bot.load_single_json("weekly_quests", "main", {"week": 0, "quests": []})
+        quest_submissions = await self.bot.load_all_json("quest_submissions")
+        approved_proofs = await self.bot.load_list_values("approved_proofs", "normalized_url")
 
         user_id = str(ctx.author.id)
         week = str(weekly_quests.get("week", "0"))
@@ -1876,7 +1873,7 @@ class AdminCommands(commands.Cog):
         }
 
         # ✅ FIX: Save the updated quest submissions immediately
-        await self.bot.save_data(self.bot, "quest_submissions", quest_submissions)
+        await self.bot.save_all_json("quest_submissions", self.quest_submissions)
 
         # 4. Notify moderators and the user
         mod_review_channel = self.bot.get_channel(config.MOD_QUEST_REVIEW_CHANNEL_ID)
@@ -1914,11 +1911,11 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load all necessary data from the database
-        weekly_quests = await self.bot.load_data(self.bot, "weekly_quests", {"week": "0"})
-        quest_submissions = await self.bot.load_data(self.bot, "quest_submissions", {})
-        admin_points = await self.bot.load_data(self.bot, "admin_points", {})
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
-        approved_proofs = await self.bot.load_data(self.bot, "approved_proofs", [])
+        weekly_quests = await self.bot.load_single_json("weekly_quests", "main", {"week": 0, "quests": []})
+        quest_submissions = await self.bot.load_all_json("quest_submissions")
+        admin_points = await self.bot.load_single_json("admin_points", "main", {})
+        users_points = await self.bot.load_all_json("users_points")
+        approved_proofs = await self.bot.load_list_values("approved_proofs", "normalized_url")
 
         user_id = str(member.id)
         week = str(weekly_quests.get("week", "0"))
@@ -1977,10 +1974,10 @@ class AdminCommands(commands.Cog):
             await self.bot.log_points_transaction(user_id, points_to_award, f"Quest {quest_number} approval")
 
             # ✅ FIX: Save all the updated dictionaries back to the database
-            await self.bot.save_data(self.bot, "users_points", users_points)
-            await self.bot.save_data(self.bot, "quest_submissions", quest_submissions)
-            await self.bot.save_data(self.bot, "admin_points", admin_points)
-            await self.bot.save_data(self.bot, "approved_proofs", approved_proofs)
+            await self.bot.save_all_json("users_points", users_points)
+            await self.bot.save_all_json("quest_submissions", self.quest_submissions)
+            await self.bot.save_single_json("admin_points", "main", admin_points)
+            await self.bot.save_list_values("approved_proofs", self.approved_proofs, "normalized_url")
 
             # Send an approval message to the user channel
             user_channel = self.bot.get_channel(config.QUEST_SUBMIT_CHANNEL_ID)
@@ -2001,7 +1998,7 @@ class AdminCommands(commands.Cog):
             quest_data[str(quest_number)]["status"] = "rejected"
 
             # ✅ FIX: Save the updated quest submissions dictionary
-            await self.bot.save_data(self.bot, "quest_submissions", quest_submissions)
+            await self.bot.save_all_json("quest_submissions", self.quest_submissions)
 
             # Send a rejection message to the user channel
             user_channel = self.bot.get_channel(config.QUEST_SUBMIT_CHANNEL_ID)
@@ -2044,9 +2041,9 @@ class AdminCommands(commands.Cog):
             return
 
         # ✅ FIX: Load all necessary data from the database
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
-        admin_points = await self.bot.load_data(self.bot, "admin_points", {})
-        processed_reactions = await self.bot.load_data(self.bot, "processed_reactions", set())
+        users_points = await self.bot.load_all_json("users_points")
+        admin_points = await self.bot.load_single_json("admin_points", "main", {})
+        processed_reactions = set(await self.bot.load_list_values("processed_reactions", "reaction_identifier"))
 
         # Check 3: Role and admin balance
         reactor_member = reaction.message.guild.get_member(user.id)
@@ -2084,9 +2081,9 @@ class AdminCommands(commands.Cog):
         processed_reactions.add(reaction_identifier)
 
         # ✅ FIX: Save all the updated data back to the database
-        await self.bot.save_data(self.bot, "users_points", users_points)
-        await self.bot.save_data(self.bot, "admin_points", admin_points)
-        await self.bot.save_data(self.bot, "processed_reactions", processed_reactions)
+        await self.bot.save_all_json("users_points", users_points)
+        await self.bot.save_single_json("admin_points", "main", admin_points)
+        await self.bot.save_list_values("processed_reactions", list(self.processed_reactions), "reaction_identifier")
 
         # Confirmation Message with an Embed
         embed = discord.Embed(
@@ -2113,10 +2110,10 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # ✅ FIX: Load active tickets from the database
-        active_tickets = await self.bot.load_data(self.bot, "active_tickets", {})
+        self.active_tickets = await self.bot.load_all_json("active_tickets")
 
         ticket_channel_id = ctx.channel.id
-        if ticket_channel_id not in active_tickets:
+        if ticket_channel_id not in self.active_tickets:
             await ctx.send("❌ This command can only be used inside a ticket channel.", delete_after=10)
             return
 
@@ -2127,7 +2124,7 @@ class AdminCommands(commands.Cog):
             return
 
         await ctx.channel.edit(name=f"closed-{ctx.channel.name}", category=archived_category)
-        user_id = active_tickets.get(ticket_channel_id)
+        user_id = self.active_tickets.get(ticket_channel_id)
         user = ctx.guild.get_member(user_id)
         if user:
             await ctx.channel.set_permissions(user, overwrite=None)
@@ -2135,10 +2132,10 @@ class AdminCommands(commands.Cog):
         await ctx.send("This ticket has been closed and will be deleted in 30 days.")
 
         # 2. Update the active tickets on the loaded dictionary
-        del active_tickets[ticket_channel_id]
+        del self.active_tickets[ticket_channel_id]
 
         # ✅ FIX: Save the updated active tickets dictionary
-        await self.bot.save_data(self.bot, "active_tickets", active_tickets)
+        await self.bot.save_all_json("active_tickets", self.active_tickets)
 
     # -------------------------- D I S C O R D         E M B E D -------------------------------------------------
     @commands.command(name="announce",
@@ -2171,9 +2168,9 @@ class AdminCommands(commands.Cog):
         user_id = str(ctx.author.id)
 
         # ✅ FIX: Load all necessary data from the database
-        users_points = await self.bot.load_data(self.bot, "users_points", {})
-        admin_points = await self.bot.load_data(self.bot, "admin_points", {})
-        mysterybox_uses = await self.bot.load_data(self.bot, "mysterybox_uses", {})
+        users_points = await self.bot.load_all_json("users_points")
+        admin_points = await self.bot.load_single_json("admin_points", "main", {})
+        mysterybox_uses = await self.bot.load_all_json("mysterybox_uses")
 
         # 1. Validation Checks
         if ctx.channel.id != config.MYSTERYBOX_CHANNEL_ID:
@@ -2225,9 +2222,9 @@ class AdminCommands(commands.Cog):
         self.bot.mb_add_use(user_id, mysterybox_uses)
 
         # ✅ FIX: Save all updated data back to the database
-        await self.bot.save_data(self.bot, "users_points", users_points)
-        await self.bot.save_data(self.bot, "admin_points", admin_points)
-        await self.bot.save_data(self.bot, "mysterybox_uses", mysterybox_uses)
+        await self.bot.save_all_json("users_points", users_points)
+        await self.bot.save_single_json("admin_points", "main", admin_points)
+        await self.bot.save_all_json("mysterybox_uses", mysterybox_uses)
 
         # 3. Notifications and Logging
         log_ch = self.bot.get_channel(config.COMMAND_LOG_CHANNEL_ID)
@@ -2315,7 +2312,7 @@ class AdminCommands(commands.Cog):
         # --- 1. Ticket System Logic (if applicable) ---
         if message.channel.id == config.SUPPORT_CHANNEL_ID:
             # ✅ FIX: Load active tickets using the correct key
-            active_tickets = await self.bot.load_data(self.bot, "active_tickets", {})
+            active_tickets = await self.bot.load_all_json("active_tickets")
             user_id = message.author.id
 
             if user_id in active_tickets.values():
@@ -2372,8 +2369,7 @@ class AdminCommands(commands.Cog):
                 await message.delete()
 
                 active_tickets[ticket_channel.id] = user.id
-                # ✅ FIX: Save with the correct, consistent key
-                await self.bot.save_data(self.bot, "active_tickets", active_tickets)
+                await self.bot.save_all_json("active_tickets", active_tickets)
 
                 logger.info(f"Created new ticket for {user.name} in channel #{ticket_channel.name}.")
 
@@ -2398,7 +2394,7 @@ class AdminCommands(commands.Cog):
         # --- 2. VIP Post Logic ---
         if message.channel.id == config.ENGAGEMENT_CHANNEL_ID:
             # ✅ FIX: Load vip posts data for persistence
-            vip_posts = await self.bot.load_data(self.bot, "vip_posts", {})
+            vip_posts = await self.bot.load_all_json("vip_posts")
 
             member = message.author
             is_mod_or_admin = any(role.id in [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID] for role in member.roles)
@@ -2422,7 +2418,7 @@ class AdminCommands(commands.Cog):
                 logger.info(f"Deleted message from non-VIP user {member.name} in engagement channel.")
 
                 # ✅ FIX: Save the updated vip_posts before returning
-                await self.bot.save_data(self.bot, "vip_posts", vip_posts)
+                await self.bot.save_all_json("vip_posts", vip_posts)
                 return
 
             vip_posts[user_id]["count"] += 1
@@ -2435,7 +2431,7 @@ class AdminCommands(commands.Cog):
                 logger.info(f"Deleted message from {member.name} for exceeding VIP daily limit.")
 
             # ✅ FIX: Save the updated vip_posts dictionary
-            await self.bot.save_data(self.bot, "vip_posts", vip_posts)
+            await self.bot.save_all_json("vip_posts", vip_posts)
             return
 
         # The Payment Message Logic is already safe as it doesn't modify data.
@@ -2451,9 +2447,9 @@ class AdminCommands(commands.Cog):
                 today = str(datetime.now(UTC).date())
 
                 # ✅ FIX: Load all necessary data from the database
-                users_points = await self.bot.load_all_json(self, "users_points", {})
-                admin_points = await self.bot.load_all_json(self, "admin_points", {})
-                gm_log = await self.bot.load_all_json(self, "gm_log", {})
+                users_points = await self.bot.load_all_json("users_points")
+                admin_points = await self.bot.load_single_json("admin_points", "main", {})
+                gm_log = await self.bot.load_all_json("gm_log")
 
                 if gm_log.get(user_id) != today:
                     is_author_admin = any(role.id == config.ADMIN_ROLE_ID for role in message.author.roles)
@@ -2463,6 +2459,7 @@ class AdminCommands(commands.Cog):
                         admin_points["balance"] -= config.GM_MV_POINTS_REWARD
                         admin_points["my_points"] += config.GM_MV_POINTS_REWARD
                         admin_points["in_circulation"] += config.GM_MV_POINTS_REWARD
+                        await self.bot.save_single_json("admin_points", "main", admin_points)
                     else:
                         # ✅ FIX: Check and modify loaded admin_points and users_points
                         if admin_points["balance"] < config.GM_MV_POINTS_REWARD:
@@ -2481,9 +2478,9 @@ class AdminCommands(commands.Cog):
 
                     # ✅ FIX: Update and save all three data tables
                     gm_log[user_id] = today
-                    await self.bot.save_all_json(self, "users_points", self.bot.users_points)
-                    await self.bot.save_single_json(self, "admin_points", "main", self.bot.admin_points)
-                    await self.bot.save_all_json(self, "gm_log", self.bot.gm_log)
+                    await self.bot.save_all_json("users_points", users_points)
+                    await self.bot.save_single_json("admin_points", "main", admin_points)
+                    await self.bot.save_all_json("gm_log", gm_log)
 
                     embed = discord.Embed(
                         title="🎉 GM/MV Points Awarded! 🎉",
@@ -2499,12 +2496,12 @@ class AdminCommands(commands.Cog):
         # --- 4. XP and Moderation Logic (applies to ALL messages) ---
         user_id = str(message.author.id)
         # ✅ FIX: Load user_xp and save immediately after modification
-        user_xp = await self.bot.load_data(self.bot, "user_xp", {})
+        user_xp = await self.bot.load_all_json("user_xp")
         user_xp.setdefault(user_id, {"xp": 0})
         xp_earned = random.randint(5, 15)
         user_xp[user_id]["xp"] += xp_earned
 
-        await self.bot.save_data(self.bot, "user_xp", user_xp)
+        await self.bot.save_all_json("user_xp", user_xp)
 
         # Banned Words Check
         cleaned_content = message.content.lower().translate(str.maketrans('', '', string.punctuation))
