@@ -1,34 +1,41 @@
+# admin.py - Admin cog for 1stOdogwu community bot
+# Contains all administrative commands and premium admin features.
+# Comments are preserved for clarity and maintainability.
+
 import discord
 from discord.ext import commands
 import random
-import re
-import asyncio
 import string
 import time
 from datetime import datetime, UTC
 
-# These are the only necessary local imports
 from logger import bot_logger as logger
 from utils import normalize_url
 import config
 
-
 class AdminCommands(commands.Cog):
+    """
+    Cog for all admin/premium features and commands.
+    Only users with the admin role can use these commands.
+    """
+
     def __init__(self, bot):
         self.bot = bot
 
-# ======== T H E      E M B E D      M E S S A G E        M E C H A N I S M ===
-    #  E C O N O M Y     E M B E D     M E S S A G E
+    # =========================
+    #   PREMIUM EMBED GENERATORS
+    # =========================
+
     async def get_economy_embed(self):
         """
-        Builds a premium embed for the economy status message.
+        Generates a premium embed showing the current points economy status.
         """
         try:
-            admin_data = await self.bot.load_single_json("admin_points", "main", {})
-            # Use bot attribute for color
+            # Using new helper pattern: always load fresh data; do NOT use self.admin_points
+            admin_data = await self.bot.load_single_json(self.bot, "admin_points", "main", {})
             embed_color = discord.Color.from_rgb(255, 204, 0)
 
-            # Retrieve all point values with a default of 0.0
+            # Read economy values
             balance = admin_data.get("balance", 0.0)
             in_circulation = admin_data.get("in_circulation", 0.0)
             burned = admin_data.get("burned", 0.0)
@@ -36,7 +43,7 @@ class AdminCommands(commands.Cog):
             my_points = admin_data.get("my_points", 0.0)
             total_supply = admin_data.get("total_supply", 0.0)
 
-            # Calculate USD values using the constant from self.bot
+            # USD conversions
             usd_total_supply = total_supply * config.POINTS_TO_USD
             usd_balance = balance * config.POINTS_TO_USD
             usd_in_circulation = in_circulation * config.POINTS_TO_USD
@@ -44,33 +51,21 @@ class AdminCommands(commands.Cog):
             usd_treasury = treasury * config.POINTS_TO_USD
             usd_my_points = my_points * config.POINTS_TO_USD
 
-            # Create the embed object
+            # Build embed
             embed = discord.Embed(
                 title="🪙 ManaVerse Economy Status",
                 description="A real-time overview of the points economy.",
                 color=embed_color
             )
-
-            # Add fields for each data point
-            embed.add_field(name="Total Supply", value=f"**{total_supply:,.2f}** points\n(${usd_total_supply:,.2f})",
-                            inline=False)
-            embed.add_field(name="Remaining Supply", value=f"**{balance:,.2f}** points\n(${usd_balance:,.2f})",
-                            inline=True)
-            embed.add_field(name="In Circulation",
-                            value=f"**{in_circulation:,.2f}** points\n(${usd_in_circulation:,.2f})",
-                            inline=True)
-            embed.add_field(name="Burned", value=f"**{burned:,.2f}** points\n(${usd_burned:,.2f})",
-                            inline=True)
+            embed.add_field(name="Total Supply", value=f"**{total_supply:,.2f}** points\n(${usd_total_supply:,.2f})", inline=False)
+            embed.add_field(name="Remaining Supply", value=f"**{balance:,.2f}** points\n(${usd_balance:,.2f})", inline=True)
+            embed.add_field(name="In Circulation", value=f"**{in_circulation:,.2f}** points\n(${usd_in_circulation:,.2f})", inline=True)
+            embed.add_field(name="Burned", value=f"**{burned:,.2f}** points\n(${usd_burned:,.2f})", inline=True)
             embed.add_field(name="Treasury", value=f"**{treasury:,.2f}** points\n(${usd_treasury:,.2f})", inline=True)
-            embed.add_field(name="Admin's Earned Points", value=f"**{my_points:,.2f}** points\n(${usd_my_points:,.2f})",
-                            inline=True)
-
-            # Add a footer with a timestamp
+            embed.add_field(name="Admin's Earned Points", value=f"**{my_points:,.2f}** points\n(${usd_my_points:,.2f})", inline=True)
             embed.set_footer(text="Data is updated in real-time.")
             embed.timestamp = datetime.now(UTC)
-
             return embed
-
         except Exception as e:
             logger.error(f"❌ An error occurred while building the economy embed: {e}")
             error_embed = discord.Embed(
@@ -80,182 +75,149 @@ class AdminCommands(commands.Cog):
             )
             return error_embed
 
+    # =========================
+    #   LEADERBOARD EMBED GENERATORS (with bot/admin/mod exclusion)
+    # =========================
 
-    #    R E F E R R A L       L E A D E R B O A R D           E M B E D            M E S S A G E
     async def get_referral_leaderboard_embed(self):
         """
-        Generates a premium referral leaderboard embed from the referral data.
+        Generates a premium embed showing the top 10 referral leaderboard.
+        Excludes bots, admins, and mods from the leaderboard.
         """
         embed = discord.Embed(
             title="🏆 Top 10 Referral Leaderboard",
             description="These are the top community members who are growing the server! 🚀",
             color=discord.Color.gold()
         )
-        referral_data = await self.bot.load_all_json("referral_data")
+        # Load referral data from database
+        referral_data = await self.bot.load_all_json(self.bot, "referral_data")
 
-        # Count referrals for each user
+        # Tally referrals per referrer, skipping self-referral and bot as referrer
         referral_counts = {}
         for user_id, referrer_id in referral_data.items():
-            if int(referrer_id) != self.bot.user.id:
-                referral_counts[referrer_id] = referral_counts.get(referrer_id, 0) + 1
+            # Exclude self-referrals (if any)
+            if user_id == referrer_id:
+                continue
+            user_obj = self.bot.get_user(int(referrer_id))
+            if user_obj is None:
+                continue  # User not found (may have left the server)
+            if user_obj.bot:
+                continue  # Exclude bots
+            # Optionally check admin/mod roles
+            guild = self.bot.get_guild(config.SERVER_ID)
+            if guild:
+                member = guild.get_member(int(referrer_id))
+                if member:
+                    if any(role.id in [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID] for role in member.roles):
+                        continue  # Exclude admin/mod
+            referral_counts[referrer_id] = referral_counts.get(referrer_id, 0) + 1
 
-        # Sort the users by their referral count
-        sorted_referrals = sorted(
-            referral_counts.items(),
-            key=lambda item: item[1],
-            reverse=True
-        )
-
+        # Sort by number of referrals
+        sorted_referrals = sorted(referral_counts.items(), key=lambda item: item[1], reverse=True)
         if not sorted_referrals:
             embed.description = "The referral leaderboard is currently empty."
             return embed
-
-        # Use a list comprehension and join for better performance
         medals = ["🥇", "🥈", "🥉"]
         leaderboard_lines = []
-
         for rank, (user_id, count) in enumerate(sorted_referrals[:10], 1):
             if count == 0:
                 continue
-
             user = self.bot.get_user(int(user_id))
             user_name = user.display_name if user else f"User ID: {user_id}"
-
-            # Determine the medal emoji for the rank
             medal = medals[rank - 1] if rank <= 3 else "🏅"
-
             leaderboard_lines.append(f"**{medal}** **#{rank}.** {user_name} with **{count}** referrals")
-
         leaderboard_text = "\n".join(leaderboard_lines)
-
         embed.add_field(name="🌟 Top Referrers", value=leaderboard_text, inline=False)
         embed.set_footer(text="Updated periodically. Keep referring friends! 💖")
         embed.timestamp = datetime.now(UTC)
         return embed
 
-
-    #   P O I N T S        L E A D E R B O A R D      E M B E D      M E S S A G E
     async def get_points_leaderboard_embed(self):
         """
-        Generates a formatted points leaderboard embed with medal logic.
+        Generates a premium embed showing the top 10 all-time point earners.
+        Excludes bots, admins, and mods from the leaderboard.
         """
-        # 1. Get the guild once for efficiency
         guild = self.bot.get_guild(config.SERVER_ID)
         if not guild:
             logger.error(f"❌ Guild with ID {config.SERVER_ID} not found.")
             return discord.Embed(description="Server not found. Please check configuration.")
-
-        users_points = await self.bot.load_all_json(self, "user_points")
-
-        # 2. Filter eligible users efficiently
+        # Load points data from database
+        users_points = await self.bot.load_all_json(self.bot, "users_points")
         eligible_users = {}
         for member in guild.members:
-            # Check if the member has the admin or mod role
+            # Exclude bots
+            if member.bot:
+                continue
+            # Exclude admins and mods from leaderboard
             if any(role.id in [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID] for role in member.roles):
                 continue
-
-            # Check if the user has points in the database
             user_data = users_points.get(str(member.id))
             if user_data and user_data.get('all_time_points', 0) > 0:
                 eligible_users[str(member.id)] = user_data
-
-        # 3. Sort the eligible users by their points
-        sorted_points = sorted(
-            eligible_users.items(),
-            key=lambda item: item[1].get('all_time_points', 0),
-            reverse=True
-        )
-
-        # 4. Create the embed
+        sorted_points = sorted(eligible_users.items(), key=lambda item: item[1].get('all_time_points', 0), reverse=True)
         embed = discord.Embed(
             title="💰 Points Leaderboard",
             description="Here are the top members with the most points! 💎",
             color=discord.Color.green()
         )
-
         if not sorted_points:
             embed.description = "The points leaderboard is currently empty. Start earning points!"
             return embed
-
-        # 5. Build the leaderboard text using a list and .join()
         medals = ["🥇", "🥈", "🥉"]
         leaderboard_lines = []
         for rank, (user_id, points_data) in enumerate(sorted_points[:10], 1):
             points = points_data.get('all_time_points', 0)
-
             user = self.bot.get_user(int(user_id))
             user_name = user.display_name if user else f"User ID: {user_id}"
-
             medal = medals[rank - 1] if rank <= 3 else "🏅"
             leaderboard_lines.append(f"**{medal}** **#{rank}.** {user_name} with **{points:,.2f} points**")
-
         embed.add_field(name="🌟 Top Point Earners", value="\n".join(leaderboard_lines), inline=False)
         embed.set_footer(text="Updated periodically. Keep earning points! 🚀")
         embed.timestamp = datetime.now(UTC)
-
         return embed
 
-
-    #   X P      L E A D E R B O A R D       E M B E D      M E S S A G E
     async def get_xp_leaderboard_embed(self):
         """
-        Generates a premium XP leaderboard embed.
+        Generates a premium embed showing the top 10 XP earners.
+        Excludes bots, admins, and mods from the leaderboard.
         """
-        # 1. Get the guild once for efficiency
         guild = self.bot.get_guild(config.SERVER_ID)
         if not guild:
             logger.error(f"❌ Guild with ID {config.SERVER_ID} not found.")
             return discord.Embed(description="Server not found. Please check configuration.")
-
-        user_xp = await self.bot.load_all_json("user_xp")
-
-        # 2. Filter eligible users efficiently
+        # Load XP data from database
+        user_xp = await self.bot.load_all_json(self.bot, "user_xp")
         eligible_users = {}
         for member in guild.members:
-            # Check if the member has the admin or mod role
+            # Exclude bots
+            if member.bot:
+                continue
+            # Exclude admins and mods from leaderboard
             if any(role.id in [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID] for role in member.roles):
                 continue
-
-            # Check if the user has XP in the database
             user_data = user_xp.get(str(member.id))
             if user_data and user_data.get('xp', 0) > 0:
                 eligible_users[str(member.id)] = user_data
-
-        # 3. Sort the eligible users by their XP
-        sorted_xp = sorted(
-            eligible_users.items(),
-            key=lambda item: item[1].get('xp', 0),
-            reverse=True
-        )
-
-        # 4. Create the embed
+        sorted_xp = sorted(eligible_users.items(), key=lambda item: item[1].get('xp', 0), reverse=True)
         embed = discord.Embed(
             title="🔥 XP Leaderboard",
             description="These members have the most Mana XP! 🌟",
             color=discord.Color.blue()
         )
-
         if not sorted_xp:
             embed.description = "The XP leaderboard is currently empty."
             return embed
-
-        # 5. Build the leaderboard text using a list and .join()
         medals = ["🥇", "🥈", "🥉"]
         leaderboard_lines = []
         for rank, (user_id, xp_data) in enumerate(sorted_xp[:10], 1):
             xp = xp_data.get('xp', 0)
-
-            # Get the user from cache for performance
             user = self.bot.get_user(int(user_id))
             user_name = user.display_name if user else f"User ID: {user_id}"
-
             medal = medals[rank - 1] if rank <= 3 else "🏅"
             leaderboard_lines.append(f"**{medal}** **#{rank}.** {user_name} with **{xp} XP**")
-
         embed.add_field(name="🌟 Top XP Earners", value="\n".join(leaderboard_lines), inline=False)
         embed.set_footer(text="Updated periodically.")
         embed.timestamp = datetime.now(UTC)
-
         return embed
 
     async def append_new_winner_to_history(self):
@@ -284,9 +246,9 @@ class AdminCommands(commands.Cog):
 
         logger.info("✅ New winners appended to the all-time log and temporary log cleared.")
 
-        # ✅ STEP 5: Save both lists back to the database
-        await self.bot.save_list_of_json("all_time_giveaway_logs", self.all_time_giveaway_winners_log)
-        await self.bot.save_list_of_json("giveaway_logs", self.giveaway_winners_log)
+        # ✅ STEP 5: Save both lists back to the database (use updated lists!)
+        await self.bot.save_list_of_json("all_time_giveaway_logs", all_time_winners)
+        await self.bot.save_list_of_json("giveaway_logs", temporary_winners)
 
         # 6. Call the helper function to update the history message
         await self.bot.update_giveaway_winners_history_message()
@@ -401,16 +363,18 @@ class AdminCommands(commands.Cog):
                 except discord.HTTPException as e:
                     logger.error(f"❌ HTTP Error removing role '{role.name}' from {member.display_name}: {e}")
 
+    # =========================
+    #   ADMIN COMMANDS
+    # =========================
 
-    # -------------------------A D M I N       U N I T-----------------------------------
     @commands.command(name='admin', help="(Admin Only) Displays the bot's point economy status as a premium embed.")
     @commands.has_any_role(config.ADMIN_ROLE_ID)
     async def admin(self, ctx):
         """
-        (Admin Only) Displays the bot's point economy status as a premium embed.
+        Shows the premium embed of the bot's point economy status.
+        Admin only!
         """
         await ctx.message.delete()
-
         economy_embed = await self.get_economy_embed()
         await ctx.send(embed=economy_embed)
 
@@ -472,6 +436,172 @@ class AdminCommands(commands.Cog):
         embed.timestamp = datetime.now(UTC)
         await ctx.send(embed=embed)
 
+#==============================================
+    #MANUALLY ADDPOINTS BY ADMIN ONLY
+#==============================================
+    @commands.command(name="addpoints", help="(Admin Only) Manually adds points to users.")
+    @commands.has_any_role(config.ADMIN_ROLE_ID)
+    async def addpoints(self, ctx, members: commands.Greedy[discord.Member], points_to_add: float, *,
+                        purpose: str = "Giveaway winner"):
+        """
+        Admin command to manually add points to one or more users.
+        Usage: !addpoints @user1 @user2 ... <amount> [purpose]
+        """
+        await ctx.message.delete()
+        # Only allow in the giveaway channel
+        if ctx.channel.id != config.GIVEAWAY_CHANNEL_ID:
+            await ctx.send("❌ This command can only be used in the giveaway channel.", delete_after=10)
+            return
+        if not members or points_to_add <= 0:
+            await ctx.send("❌ You must mention at least one member and the points must be greater than zero.",
+                           delete_after=10)
+            return
+
+        # Load data from DB
+        admin_points = await self.bot.load_single_json(self.bot, "admin_points", "main", {})
+        users_points = await self.bot.load_all_json(self.bot, "users_points")
+        giveaway_winners_log = await self.bot.load_list_of_json(self.bot, "giveaway_logs")
+        all_time_giveaway_winners_log = await self.bot.load_list_of_json(self.bot, "all_time_giveaway_logs")
+
+        total_points = points_to_add * len(members)
+        if admin_points.get("balance", 0) < total_points:
+            await ctx.send("❌ Admin balance too low.", delete_after=10)
+            return
+
+        winners_list = []
+        for member in members:
+            user_id = str(member.id)
+            users_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
+            users_points[user_id]["all_time_points"] += points_to_add
+            users_points[user_id]["available_points"] += points_to_add
+            await self.bot.log_points_transaction(user_id, points_to_add, purpose)
+            winner_entry = {"user_id": user_id, "points": points_to_add, "purpose": purpose,
+                            "timestamp": datetime.now(UTC).isoformat()}
+            giveaway_winners_log.append(winner_entry)
+            all_time_giveaway_winners_log.append(winner_entry)
+            winners_list.append(member.mention)
+
+        admin_points["balance"] -= total_points
+        admin_points["in_circulation"] += total_points
+
+        # Save data back to DB
+        await self.bot.save_all_json(self.bot, "users_points", users_points)
+        await self.bot.save_single_json(self.bot, "admin_points", "main", admin_points)
+        await self.bot.save_list_of_json(self.bot, "giveaway_logs", giveaway_winners_log)
+        await self.bot.save_list_of_json(self.bot, "all_time_giveaway_logs", all_time_giveaway_winners_log)
+
+        embed = discord.Embed(title="🎉 Points Awarded!", description=f"The following user(s) have been awarded points:",
+                              color=discord.Color.gold())
+        embed.add_field(name="User(s)", value=', '.join(winners_list), inline=False)
+        embed.add_field(name="Points per User", value=f"**{points_to_add:.2f}**", inline=True)
+        embed.add_field(name="Total Points Awarded", value=f"**{total_points:.2f}**", inline=True)
+        embed.add_field(name="Purpose", value=purpose, inline=False)
+        embed.set_footer(text=f"Action by {ctx.author.name}")
+        embed.timestamp = datetime.now(UTC)
+        await ctx.send(embed=embed)
+
+
+    @commands.command(name='addpoints_flex',
+                      help="(Admin Only) Manually adds different point amounts to multiple users.")
+    @commands.has_any_role(config.ADMIN_ROLE_ID)
+    async def addpoints_flex(self, ctx, *args):
+        """(Admin Only) Manually adds different point amounts to multiple users."""
+        # Delete the command message immediately
+        await ctx.message.delete()
+
+        # 1. Check for the correct channel
+        if ctx.channel.id != config.GIVEAWAY_CHANNEL_ID:
+            embed = discord.Embed(title="❌ Incorrect Channel",
+                                  description=f"This command can only be used in the <#{config.GIVEAWAY_CHANNEL_ID}> channel.",
+                                  color=discord.Color.red())
+            await ctx.send(embed=embed, delete_after=10)
+            return
+
+        # 2. Parse the arguments
+        if not args:
+            await ctx.send("❌ Error: Please provide at least one user and point pair.", delete_after=20)
+            return
+
+        points_to_award = {}
+        purpose = "Manual addition"
+
+        try:
+            float(args[-1])
+            # If it's a number, the purpose is the default, and we proceed with the whole args tuple
+        except ValueError:
+            purpose = args[-1]
+            args = args[:-1]
+
+        # Iterate through pairs of user mentions and points
+        i = 0
+        while i < len(args):
+            try:
+                member = await commands.MemberConverter().convert(ctx, args[i])
+                points = float(args[i + 1])
+                if points <= 0:
+                    await ctx.send("❌ Error: Points must be greater than zero.", delete_after=20)
+                    return
+                points_to_award[member] = points
+                i += 2
+            except (commands.BadArgument, ValueError):
+                # If parsing fails, something is wrong with the arguments.
+                await ctx.send("❌ Error: Could not find any valid user and point pairs.", delete_after=20)
+                return
+
+        if not points_to_award:
+            await ctx.send("❌ Error: Could not find any valid user and point pairs.", delete_after=20)
+            return
+
+        # 3. Load admin_points and users_points from database (refactor: don't use self.bot.* as source of truth)
+        admin_points = await self.bot.load_single_json("admin_points", "main", {})
+        users_points = await self.bot.load_all_json("users_points")
+        giveaway_winners_log = await self.bot.load_list_of_json("giveaway_logs")
+        all_time_giveaway_winners_log = await self.bot.load_list_of_json("all_time_giveaway_logs")
+
+        # 4. Validate the transaction
+        total_points = sum(points_to_award.values())
+        if admin_points.get("balance", 0) < total_points:
+            await ctx.send(f"❌ Error: Admin balance is too low to award a total of {total_points:.2f} points.",
+                           delete_after=20)
+            return
+
+        # 5. Process the transaction in memory (using loaded data)
+        winners_list = []
+        for member, points in points_to_award.items():
+            user_id = str(member.id)
+
+            users_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
+            users_points[user_id]["all_time_points"] += points
+            users_points[user_id]["available_points"] += points
+
+            await self.bot.log_points_transaction(user_id, points, purpose)
+
+            winner_entry = {"user_id": user_id, "points": points, "purpose": purpose,
+                            "timestamp": datetime.now(UTC).isoformat()}
+            giveaway_winners_log.append(winner_entry)
+            all_time_giveaway_winners_log.append(winner_entry)
+
+            winners_list.append(f"{member.mention} ({points:.2f})")
+
+        admin_points["balance"] -= total_points
+        admin_points["in_circulation"] += total_points
+
+        # 6. Save all updated tables
+        await self.bot.save_all_json("users_points", users_points)
+        await self.bot.save_single_json("admin_points", "main", admin_points)
+        await self.bot.save_list_of_json("giveaway_logs", giveaway_winners_log)
+        await self.bot.save_list_of_json("all_time_giveaway_logs", all_time_giveaway_winners_log)
+
+        # 7. Send a confirmation embed
+        embed = discord.Embed(title="🎉 Points Awarded!",
+                              description=f"The following user(s) have been awarded points:",
+                              color=discord.Color.gold())
+        embed.add_field(name="Winners", value='\n'.join(winners_list), inline=False)
+        embed.add_field(name="Purpose", value=purpose, inline=False)
+        embed.set_footer(text=f"Action by {ctx.author.name}")
+        embed.timestamp = datetime.now(UTC)
+        await ctx.send(embed=embed, delete_after=86400)
+
 
 # ----------------------R E F E R R A L-----------------U N I T-----------------------------------------
     # === MEMBER JOIN (REFERRAL) ===
@@ -517,7 +647,7 @@ class AdminCommands(commands.Cog):
             logger.info(f"New pending referral for {member.name}. Referrer: {referrer.name}")
 
             # ✅ STEP 2: Save the updated pending referrals list back to the database
-            await self.bot.save_all_json("pending_referrals", self.pending_referrals)
+            await self.bot.save_all_json("pending_referrals", pending_referrals)
 
             # ✅ FIX: Send the message to the referral channel instead of the user's DMs
             channel = self.bot.get_channel(config.REFERRAL_CHANNEL_ID)
@@ -640,14 +770,14 @@ class AdminCommands(commands.Cog):
 
                     await self.bot.save_all_json("users_points", users_points)
                     await self.bot.save_single_json("admin_points", "main", admin_points)
-                    await self.bot.save_all_json("referral_data", self.referral_data)
+                    await self.bot.save_all_json("referral_data", referral_data)
 
                     # ✅ STEP 3: Now that data is saved, modify and save the other tables.
                     # We can now safely delete the user from pending and add it into referred.
                     del pending_referrals[user_id]
                     referred_users.add(user_id)
-                    await self.bot.save_all_json("pending_referrals", self.pending_referrals)
-                    await self.bot.save_list_values("referred_users", list(self.referred_users), "user_id")
+                    await self.bot.save_all_json("pending_referrals", pending_referrals)
+                    await self.bot.save_list_values("referred_users", list(referred_users), "user_id")
 
                     # Log the transactions using the refactored helper function
                     if new_member_points > 0:
@@ -868,7 +998,7 @@ class AdminCommands(commands.Cog):
         }
 
         # ✅ FIX: Save the updated submissions dictionary immediately
-        await self.bot.save_all_json("submissions", self.submissions)
+        await self.bot.save_all_json("submissions", submissions)
 
         # 6. Notify Moderators
         mod_channel = self.bot.get_channel(config.MOD_TASK_REVIEW_CHANNEL_ID)
@@ -992,7 +1122,7 @@ class AdminCommands(commands.Cog):
         elif action == "reject":
             # ✅ FIX: Load the submissions dictionary, modify it, and save it.
             del submissions[user_id]
-            await self.bot.save_data(self.bot, "submissions", submissions)
+            await self.bot.save_list_of_json("submissions", submissions)
 
             user_embed = discord.Embed(title="🚫 Submission Rejected",
                                        description="Your engagement proof has been rejected. Please review your proof and submit again if needed.",
@@ -1077,7 +1207,8 @@ class AdminCommands(commands.Cog):
                     user_embed.set_footer(text="Thank you for your support!")
                     await confirm_channel.send(member.mention, embed=user_embed)
                 except discord.Forbidden:
-                    logger.error(f"Bot is missing permissions to send message to payment channel ({config.PAYMENT_CHANNEL_ID}).")
+                    logger.error(
+                        f"Bot is missing permissions to send message to payment channel ({config.PAYMENT_CHANNEL_ID}).")
             else:
                 logger.warning(f"Payment confirmation channel (ID: {config.PAYMENT_CHANNEL_ID}) not found.")
 
@@ -1107,7 +1238,6 @@ class AdminCommands(commands.Cog):
             await ctx.send(embed=http_error_embed, delete_after=10)
             logger.error(f"HTTP Error adding role '{role.name}' to {member.display_name}: {e}")
 
-
     # === CONSOLIDATED: !points command to show all-time points, available points, and rank ===
     @commands.command(name='points', help="Displays the points of a specific member or the user who ran the command.")
     async def points(self, ctx, member: discord.Member = None):
@@ -1130,9 +1260,17 @@ class AdminCommands(commands.Cog):
         all_time_points = user_data.get("all_time_points", 0.0)
         available_points = user_data.get("available_points", 0.0)
 
-        # 2. Calculate the user's rank
+        # 2. Filter out admins/mods from ranking calculation
+        allowed_roles = [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID]
+        eligible_users = {}
+        for uid, data in users_points.items():
+            member_obj = ctx.guild.get_member(int(uid))
+            if member_obj and not any(role.id in allowed_roles for role in member_obj.roles) and data.get(
+                    'all_time_points', 0) > 0:
+                eligible_users[uid] = data
+
         sorted_users = sorted(
-            users_points.items(),
+            eligible_users.items(),
             key=lambda item: item[1].get('all_time_points', 0),
             reverse=True
         )
@@ -1158,176 +1296,10 @@ class AdminCommands(commands.Cog):
 
         await ctx.send(embed=embed, delete_after=30)
 
-    # === MANUALLY ADD POINTS ===
-    @commands.command(name="addpoints",
-                      help="(Admin Only) Manually adds a specified number of points to one or more users.")
-    @commands.has_any_role(config.ADMIN_ROLE_ID)
-    async def addpoints(self, ctx, members: commands.Greedy[discord.Member], points_to_add: float, *,
-                        purpose: str = "Giveaway winner"):
-        """(Admin Only) Manually adds a specified number of points to one or more users."""
-        await ctx.message.delete()
-
-        if ctx.channel.id != config.GIVEAWAY_CHANNEL_ID:
-            embed = discord.Embed(title="❌ Incorrect Channel",
-                                  description=f"This command can only be used in the <#{config.GIVEAWAY_CHANNEL_ID}> channel.",
-                                  color=discord.Color.red())
-            await ctx.send(embed=embed, delete_after=10)
-            return
-        if not members:
-            embed = discord.Embed(title="❌ Missing Members",
-                                  description="You must mention at least one member to add points to.",
-                                  color=discord.Color.red())
-            await ctx.send(embed=embed, delete_after=10)
-            return
-        if points_to_add <= 0:
-            embed = discord.Embed(title="❌ Invalid Points", description="Points to add must be greater than zero.",
-                                  color=discord.Color.red())
-            await ctx.send(embed=embed, delete_after=10)
-            return
-
-        # ✅ FIX: Load data from the database before modifying it
-        admin_points = await self.bot.load_single_json("admin_points", "main", {})
-        users_points = await self.bot.load_all_json("users_points")
-        giveaway_winners_log = await self.bot.load_list_of_json("giveaway_logs")
-        all_time_giveaway_winners_log = await self.bot.load_list_of_json("all_time_giveaway_logs")
-
-        total_points = points_to_add * len(members)
-        if admin_points.get("balance", 0) < total_points:
-            embed = discord.Embed(title="❌ Insufficient Balance",
-                                  description=f"Admin balance is too low to award a total of **{total_points:.2f} points**.",
-                                  color=discord.Color.red())
-            await ctx.send(embed=embed, delete_after=10)
-            return
-
-        # Process the transaction on the loaded data
-        winners_list = []
-        for member in members:
-            user_id = str(member.id)
-            users_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
-            users_points[user_id]["all_time_points"] += points_to_add
-            users_points[user_id]["available_points"] += points_to_add
-            await self.bot.log_points_transaction(user_id, points_to_add, purpose)
-            winner_entry = {"user_id": user_id, "points": points_to_add, "purpose": purpose,
-                            "timestamp": datetime.now(UTC).isoformat()}
-            giveaway_winners_log.append(winner_entry)
-            all_time_giveaway_winners_log.append(winner_entry)
-            winners_list.append(member.mention)
-
-        admin_points["balance"] -= total_points
-        admin_points["in_circulation"] += total_points
-
-        # ✅ FIX: Save all the updated data back to the database
-        await self.bot.save_all_json("users_points", users_points)
-        await self.bot.save_single_json("admin_points", "main", admin_points)
-        await self.bot.save_list_of_json("giveaway_logs", self.giveaway_winners_log)
-        await self.bot.save_list_of_json("all_time_giveaway_logs", self.all_time_giveaway_winners_log)
-
-        embed = discord.Embed(title="🎉 Points Awarded!", description=f"The following user(s) have been awarded points:",
-                              color=discord.Color.gold())
-        embed.add_field(name="User(s)", value=', '.join(winners_list), inline=False)
-        embed.add_field(name="Points per User", value=f"**{points_to_add:.2f}**", inline=True)
-        embed.add_field(name="Total Points Awarded", value=f"**{total_points:.2f}**", inline=True)
-        embed.add_field(name="Purpose", value=purpose, inline=False)
-        embed.set_footer(text=f"Action by {ctx.author.name}")
-        embed.timestamp = datetime.now(UTC)
-        await ctx.send(embed=embed)
-
-
-    @commands.command(name='addpoints_flex',
-                      help="(Admin Only) Manually adds different point amounts to multiple users.")
-    @commands.has_any_role(config.ADMIN_ROLE_ID)
-    async def addpoints_flex(self, ctx, *args):
-        """(Admin Only) Manually adds different point amounts to multiple users."""
-        # Delete the command message immediately
-        await ctx.message.delete()
-
-        # 1. Check for the correct channel
-        if ctx.channel.id != config.GIVEAWAY_CHANNEL_ID:
-            embed = discord.Embed(title="❌ Incorrect Channel",
-                                  description=f"This command can only be used in the <#{config.GIVEAWAY_CHANNEL_ID}> channel.",
-                                  color=discord.Color.red())
-            await ctx.send(embed=embed, delete_after=10)
-            return
-
-        # 2. Parse the arguments
-        if not args:
-            await ctx.send("❌ Error: Please provide at least one user and point pair.", delete_after=20)
-            return
-
-        points_to_award = {}
-        purpose = "Manual addition"
-
-        try:
-            float(args[-1])
-            # If it's a number, the purpose is the default, and we proceed with the whole args tuple
-        except ValueError:
-            purpose = args[-1]
-            args = args[:-1]
-
-        # Iterate through pairs of user mentions and points
-        i = 0
-        while i < len(args):
-            try:
-                member = await commands.MemberConverter().convert(ctx, args[i])
-                points = float(args[i + 1])
-                if points <= 0:
-                    await ctx.send("❌ Error: Points must be greater than zero.", delete_after=20)
-                    return
-                points_to_award[member] = points
-                i += 2
-            except (commands.BadArgument, ValueError):
-                # If parsing fails, something is wrong with the arguments.
-                await ctx.send("❌ Error: Could not find any valid user and point pairs.", delete_after=20)
-                return
-
-        if not points_to_award:
-            await ctx.send("❌ Error: Could not find any valid user and point pairs.", delete_after=20)
-            return
-
-        # 3. Validate the transaction
-        total_points = sum(points_to_award.values())
-        if self.bot.admin_points.get("balance", 0) < total_points:
-            await ctx.send(f"❌ Error: Admin balance is too low to award a total of {total_points:.2f} points.",
-                           delete_after=20)
-            return
-
-        # 4. Process the transaction in memory
-        winners_list = []
-        for member, points in points_to_award.items():
-            user_id = str(member.id)
-
-            self.bot.users_points.setdefault(user_id, {"all_time_points": 0.0, "available_points": 0.0})
-            self.bot.users_points[user_id]["all_time_points"] += points
-            self.bot.users_points[user_id]["available_points"] += points
-            await self.bot.save_all_json("users_points", self.users_points)
-
-            await self.bot.log_points_transaction(user_id, points, purpose)
-
-            winner_entry = {"user_id": user_id, "points": points, "purpose": purpose,
-                            "timestamp": datetime.now(UTC).isoformat()}
-            self.bot.giveaway_winners_log.append(winner_entry)
-            self.bot.all_time_giveaway_winners_log.append(winner_entry)
-
-            winners_list.append(f"{member.mention} ({points:.2f})")
-
-        self.bot.admin_points["balance"] -= total_points
-        self.bot.admin_points["in_circulation"] += total_points
-
-        await self.bot.save_single_json("admin_points", "main", self.admin_points)
-
-
-        # 5. Send a confirmation embed
-        embed = discord.Embed(title="🎉 Points Awarded!",
-                              description=f"The following user(s) have been awarded points:",
-                              color=discord.Color.gold())
-        embed.add_field(name="Winners", value='\n'.join(winners_list), inline=False)
-        embed.add_field(name="Purpose", value=purpose, inline=False)
-        embed.set_footer(text=f"Action by {ctx.author.name}")
-        embed.timestamp = datetime.now(UTC)
-        await ctx.send(embed=embed, delete_after=86400)
-
     # -------------------------------- R A N K I N G --- S Y S T E M ---------------------------------------
-
+#=================
+    #USER RANKING
+#=================
     @commands.command(name="rank", help="Shows the user's rank and the top 10 leaderboards.")
     @commands.cooldown(1, 60, commands.BucketType.user)
     async def rank(self, ctx):
@@ -1390,6 +1362,9 @@ class AdminCommands(commands.Cog):
         embed.timestamp = datetime.now(UTC)
         await ctx.send(embed=embed)
 
+#=====================
+    #USER LEADERBOARD
+#=====================
     @commands.command(name="leaderboard",
                       help="Displays the top 10 users by all-time points in a premium embed format.")
     @commands.cooldown(1, 60, commands.BucketType.user)
@@ -1441,7 +1416,80 @@ class AdminCommands(commands.Cog):
         embed.timestamp = datetime.now(UTC)
         await ctx.send(embed=embed)
 
-    # === MODIFIED: !requestpayout command with minimum amount and fee ===
+#========================
+    #USER XP LEADERBOARD
+#========================
+    @commands.command(name="xp", help="Displays the user's current total XP and rank.")
+    @commands.cooldown(2, 60, commands.BucketType.user)
+    async def xp_command(self, ctx, member: discord.Member = None):
+        """Displays the user's current total XP and rank."""
+        # Delete the user's command message
+        await ctx.message.delete()
+
+        # 1. Check for the correct channel
+        if ctx.channel.id != config.XP_REWARD_CHANNEL_ID:
+            await ctx.send(f"❌ The `!xp` command can only be used in the <#{config.XP_REWARD_CHANNEL_ID}> channel.",
+                           delete_after=15)
+            return
+
+        # ✅ FIX: Load the user XP data from the database
+        user_xp = await self.bot.load_all_json("user_xp")
+
+        target_member = member if member else ctx.author
+        user_id = str(target_member.id)
+        guild = self.bot.get_guild(config.SERVER_ID)
+        if not guild:
+            logger.error("Could not find the server. Please check the SERVER_ID constant.")
+            await ctx.send("❌ Error: Could not find the server. Please check the SERVER_ID constant.", delete_after=15)
+            return
+
+        allowed_roles = [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID]
+        all_users = []
+        # ✅ FIX: Use the loaded user_xp dictionary instead of the in-memory one
+        for uid, data in user_xp.items():
+            member_obj = guild.get_member(int(uid))
+            if member_obj and not any(role.id in allowed_roles for role in member_obj.roles):
+                all_users.append((uid, data.get("xp", 0)))
+
+        sorted_xp_users = sorted(all_users, key=lambda item: item[1], reverse=True)
+        xp_balance = user_xp.get(user_id, {}).get("xp", 0)
+        user_rank = next((i for i, (uid, _) in enumerate(sorted_xp_users) if uid == user_id), None)
+
+        if xp_balance == 0:
+            embed = discord.Embed(title="📊 XP Tracker",
+                                  description=f"❌ {target_member.mention} has not earned any XP yet.",
+                                  color=discord.Color.red())
+            embed.set_footer(text="Keep chatting and completing quests to gain XP!")
+            embed.timestamp = datetime.now(UTC)
+            await ctx.send(embed=embed, delete_after=15)
+            return
+
+        medal = ""
+        if user_rank == 0:
+            medal = "🥇"
+        elif user_rank == 1:
+            medal = "🥈"
+        elif user_rank == 2:
+            medal = "🥉"
+
+        embed = discord.Embed(title="🌟 XP Status", description=f"{medal} {target_member.mention}'s XP Summary",
+                              color=discord.Color.blue())
+        embed.add_field(name="Total XP", value=f"**{xp_balance:,} XP**", inline=True)
+        if user_rank is not None:
+            embed.add_field(name="Rank", value=f"**#{user_rank + 1}** out of {len(sorted_xp_users)}", inline=True)
+        else:
+            embed.add_field(name="Rank", value="Unranked", inline=True)
+
+        embed.set_thumbnail(url=target_member.avatar.url if target_member.avatar else target_member.default_avatar.url)
+        embed.set_footer(text="ManaVerse XP System • Keep earning to climb the ranks!")
+        embed.timestamp = datetime.now(UTC)
+        await ctx.send(embed=embed, delete_after=30)
+
+
+#---------------------------P A Y O U T      S Y S T E M--------------------------------
+# ===========================
+    #!REQUEST PAYOUT COMMAND
+#============================
     @commands.command(name="requestpayout", help="Initiates a two-step payout request, requiring confirmation.")
     async def requestpayout(self, ctx, amount: float, uid: str, exchange: str):
         """Initiates a two-step payout request, requiring confirmation."""
@@ -1494,12 +1542,13 @@ class AdminCommands(commands.Cog):
             await ctx.send(f"{ctx.author.mention}", embed=embed, delete_after=10)
             return
 
-        # 4. Store the pending payout data in memory
+        # 4. Store the pending payout data in memory and save
         user_data["pending_payout"] = {
             "amount": amount, "uid": uid, "exchange": exchange, "fee": fee, "total_deduction": total_deduction,
             "timestamp": time.time()
         }
         users_points[user_id] = user_data
+        await self.bot.save_all_json("users_points", users_points)
 
         # 5. Send confirmation embed for the two-step process
         embed = discord.Embed(title="🪙 Payout Request Confirmation",
@@ -1550,8 +1599,6 @@ class AdminCommands(commands.Cog):
             if "pending_payout" in user_data:
                 del user_data["pending_payout"]
                 users_points[user_id] = user_data
-
-                # ✅ FIX: Save the updated users_points immediately if the request timed out
                 await self.bot.save_all_json("users_points", users_points)
 
             embed = discord.Embed(title="❌ Request Timed Out",
@@ -1571,8 +1618,7 @@ class AdminCommands(commands.Cog):
 
         # 3. Process the transaction on the loaded data
         user_data["available_points"] -= total_deduction
-
-        # ✅ FIX: Save the updated user points dictionary after the point deduction
+        users_points[user_id] = user_data
         await self.bot.save_all_json("users_points", users_points)
 
         # 4. Notify the user and moderators
@@ -1600,7 +1646,6 @@ class AdminCommands(commands.Cog):
                              inline=True)
         user_embed.set_footer(text="A moderator will finalize your payment shortly.")
         await ctx.send(f"{ctx.author.mention}", embed=user_embed)
-
 
     # ===!PAID ===
     @commands.command(name="paid",
@@ -1679,73 +1724,6 @@ class AdminCommands(commands.Cog):
         mod_embed.set_footer(text=f"Payout finalized by {ctx.author.name}")
         await ctx.send(embed=mod_embed, delete_after=10)
 
-    # === NEW: !xp command ===
-    @commands.command(name="xp", help="Displays the user's current total XP and rank.")
-    @commands.cooldown(2, 60, commands.BucketType.user)
-    async def xp_command(self, ctx, member: discord.Member = None):
-        """Displays the user's current total XP and rank."""
-        # Delete the user's command message
-        await ctx.message.delete()
-
-        # 1. Check for the correct channel
-        if ctx.channel.id != config.XP_REWARD_CHANNEL_ID:
-            await ctx.send(f"❌ The `!xp` command can only be used in the <#{config.XP_REWARD_CHANNEL_ID}> channel.",
-                           delete_after=15)
-            return
-
-        # ✅ FIX: Load the user XP data from the database
-        user_xp = await self.bot.load_all_json("user_xp")
-
-        target_member = member if member else ctx.author
-        user_id = str(target_member.id)
-        guild = self.bot.get_guild(config.SERVER_ID)
-        if not guild:
-            logger.error("Could not find the server. Please check the SERVER_ID constant.")
-            await ctx.send("❌ Error: Could not find the server. Please check the SERVER_ID constant.", delete_after=15)
-            return
-
-        allowed_roles = [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID]
-        all_users = []
-        # ✅ FIX: Use the loaded user_xp dictionary instead of the in-memory one
-        for uid, data in user_xp.items():
-            member_obj = guild.get_member(int(uid))
-            if member_obj and not any(role.id in allowed_roles for role in member_obj.roles):
-                all_users.append((uid, data.get("xp", 0)))
-
-        sorted_xp_users = sorted(all_users, key=lambda item: item[1], reverse=True)
-        xp_balance = user_xp.get(user_id, {}).get("xp", 0)
-        user_rank = next((i for i, (uid, _) in enumerate(sorted_xp_users) if uid == user_id), None)
-
-        if xp_balance == 0:
-            embed = discord.Embed(title="📊 XP Tracker",
-                                  description=f"❌ {target_member.mention} has not earned any XP yet.",
-                                  color=discord.Color.red())
-            embed.set_footer(text="Keep chatting and completing quests to gain XP!")
-            embed.timestamp = datetime.now(UTC)
-            await ctx.send(embed=embed, delete_after=15)
-            return
-
-        medal = ""
-        if user_rank == 0:
-            medal = "🥇"
-        elif user_rank == 1:
-            medal = "🥈"
-        elif user_rank == 2:
-            medal = "🥉"
-
-        embed = discord.Embed(title="🌟 XP Status", description=f"{medal} {target_member.mention}'s XP Summary",
-                              color=discord.Color.blue())
-        embed.add_field(name="Total XP", value=f"**{xp_balance:,} XP**", inline=True)
-        if user_rank is not None:
-            embed.add_field(name="Rank", value=f"**#{user_rank + 1}** out of {len(sorted_xp_users)}", inline=True)
-        else:
-            embed.add_field(name="Rank", value="Unranked", inline=True)
-
-        embed.set_thumbnail(url=target_member.avatar.url if target_member.avatar else target_member.default_avatar.url)
-        embed.set_footer(text="ManaVerse XP System • Keep earning to climb the ranks!")
-        embed.timestamp = datetime.now(UTC)
-        await ctx.send(embed=embed, delete_after=30)
-
     # === Weekly Quest Commands ===
     @commands.command(name="quests", help="(Admin Only) Posts 3 new weekly quests to the quest board.")
     @commands.has_permissions(administrator=True)
@@ -1771,8 +1749,8 @@ class AdminCommands(commands.Cog):
         quest_submissions = {}  # Resetting previous submissions
 
         # ✅ FIX: Save the updated data immediately
-        await self.bot.save_single_json("weekly_quests", "main", self.weekly_quests)
-        await self.bot.save_all_json("quest_submissions", self.quest_submissions)
+        await self.bot.save_single_json("weekly_quests", "main", weekly_quests)
+        await self.bot.save_all_json("quest_submissions", quest_submissions)
 
         # 2. Post new quests and send confirmation
         board = self.bot.get_channel(config.QUEST_BOARD_CHANNEL_ID)
@@ -1873,7 +1851,7 @@ class AdminCommands(commands.Cog):
         }
 
         # ✅ FIX: Save the updated quest submissions immediately
-        await self.bot.save_all_json("quest_submissions", self.quest_submissions)
+        await self.bot.save_all_json("quest_submissions", quest_submissions)
 
         # 4. Notify moderators and the user
         mod_review_channel = self.bot.get_channel(config.MOD_QUEST_REVIEW_CHANNEL_ID)
@@ -1975,9 +1953,9 @@ class AdminCommands(commands.Cog):
 
             # ✅ FIX: Save all the updated dictionaries back to the database
             await self.bot.save_all_json("users_points", users_points)
-            await self.bot.save_all_json("quest_submissions", self.quest_submissions)
+            await self.bot.save_all_json("quest_submissions", quest_submissions)
             await self.bot.save_single_json("admin_points", "main", admin_points)
-            await self.bot.save_list_values("approved_proofs", self.approved_proofs, "normalized_url")
+            await self.bot.save_list_values("approved_proofs", approved_proofs, "normalized_url")
 
             # Send an approval message to the user channel
             user_channel = self.bot.get_channel(config.QUEST_SUBMIT_CHANNEL_ID)
@@ -1998,7 +1976,7 @@ class AdminCommands(commands.Cog):
             quest_data[str(quest_number)]["status"] = "rejected"
 
             # ✅ FIX: Save the updated quest submissions dictionary
-            await self.bot.save_all_json("quest_submissions", self.quest_submissions)
+            await self.bot.save_all_json("quest_submissions", quest_submissions)
 
             # Send a rejection message to the user channel
             user_channel = self.bot.get_channel(config.QUEST_SUBMIT_CHANNEL_ID)
@@ -2048,8 +2026,10 @@ class AdminCommands(commands.Cog):
         # Check 3: Role and admin balance
         reactor_member = reaction.message.guild.get_member(user.id)
         allowed_roles = [config.ADMIN_ROLE_ID, config.MOD_ROLE_ID]
-        if not reactor_member or (not reactor_member.guild_permissions.administrator and not any(
-                role.id in allowed_roles for role in reactor_member.roles)):
+        if not reactor_member or not (
+                reactor_member.guild_permissions.administrator or
+                any(role.id in allowed_roles for role in reactor_member.roles)
+        ):
             return
 
         points_to_add = random.uniform(config.MIN_REACTION_POINTS, config.MAX_REACTION_POINTS)
@@ -2083,7 +2063,7 @@ class AdminCommands(commands.Cog):
         # ✅ FIX: Save all the updated data back to the database
         await self.bot.save_all_json("users_points", users_points)
         await self.bot.save_single_json("admin_points", "main", admin_points)
-        await self.bot.save_list_values("processed_reactions", list(self.processed_reactions), "reaction_identifier")
+        await self.bot.save_list_values("processed_reactions", list(processed_reactions), "reaction_identifier")
 
         # Confirmation Message with an Embed
         embed = discord.Embed(
@@ -2101,7 +2081,7 @@ class AdminCommands(commands.Cog):
         await reaction.message.channel.send(embed=embed, delete_after=20)
         logger.info(f"Successfully awarded {points_to_add:.2f} points to {reaction.message.author.name}")
 
-    # -----------------------------------S U P P O R T --- S Y S T E M------------------------
+# -----------------------------------S U P P O R T --- S Y S T E M------------------------
     @commands.command(name="close", help="(Admin/Mod Only) Archives a ticket and schedules it for deletion.")
     @commands.has_any_role(config.ADMIN_ROLE_ID, config.MOD_ROLE_ID)
     async def close(self, ctx):
@@ -2110,10 +2090,10 @@ class AdminCommands(commands.Cog):
         await ctx.message.delete()
 
         # ✅ FIX: Load active tickets from the database
-        self.active_tickets = await self.bot.load_all_json("active_tickets")
+        active_tickets = await self.bot.load_all_json("active_tickets")
 
         ticket_channel_id = ctx.channel.id
-        if ticket_channel_id not in self.active_tickets:
+        if ticket_channel_id not in active_tickets:
             await ctx.send("❌ This command can only be used inside a ticket channel.", delete_after=10)
             return
 
@@ -2124,7 +2104,7 @@ class AdminCommands(commands.Cog):
             return
 
         await ctx.channel.edit(name=f"closed-{ctx.channel.name}", category=archived_category)
-        user_id = self.active_tickets.get(ticket_channel_id)
+        user_id = active_tickets.get(ticket_channel_id)
         user = ctx.guild.get_member(user_id)
         if user:
             await ctx.channel.set_permissions(user, overwrite=None)
@@ -2132,12 +2112,11 @@ class AdminCommands(commands.Cog):
         await ctx.send("This ticket has been closed and will be deleted in 30 days.")
 
         # 2. Update the active tickets on the loaded dictionary
-        del self.active_tickets[ticket_channel_id]
+        del active_tickets[ticket_channel_id]
 
         # ✅ FIX: Save the updated active tickets dictionary
-        await self.bot.save_all_json("active_tickets", self.active_tickets)
+        await self.bot.save_all_json("active_tickets", active_tickets)
 
-    # -------------------------- D I S C O R D         E M B E D -------------------------------------------------
     @commands.command(name="announce",
                       help="(Admin Only) Posts a new announcement to the announcement channel as a premium embed.")
     @commands.has_permissions(administrator=True)
@@ -2160,7 +2139,6 @@ class AdminCommands(commands.Cog):
         await ctx.send("✅ Announcement posted successfully!", delete_after=10)
         logger.info(f"New announcement posted by {ctx.author.name}.")
 
-    # --------------------M Y S T E R Y     B O X     S Y S T E M-------------------------------------
     @commands.command(name="mysterybox", help="Open a Mystery Box to win a random amount of points.")
     async def cmd_mysterybox(self, ctx: commands.Context):
         # Delete the command message immediately
@@ -2468,7 +2446,7 @@ class AdminCommands(commands.Cog):
                                                        delete_after=10)
                             return
                         user_data = users_points.setdefault(user_id, {"all_time_points": 0.0,
-                                                                     "available_points": 0.0})
+                                                                      "available_points": 0.0})
                         user_data["all_time_points"] += config.GM_MV_POINTS_REWARD
                         user_data["available_points"] += config.GM_MV_POINTS_REWARD
                         admin_points["balance"] -= config.GM_MV_POINTS_REWARD
